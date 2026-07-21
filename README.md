@@ -24,7 +24,7 @@ Everything binds to `127.0.0.1` only.
 
 | Service | Port | What it is |
 |---|---|---|
-| tokenfuse-gateway | 4100 | Budget-enforcement proxy. OpenAI-compatible: point an agent's base URL here and every call is metered, and an over-budget one gets a hard 402. |
+| tokenfuse-gateway | 4100 | Budget-enforcement proxy for the Anthropic Messages API (`/v1/messages`): point an agent's base URL here and every call is metered, and an over-budget one gets a hard 402. |
 | tokenfuse-cloud | 8080 | The money-plane control API (runs, budgets, savings, incidents). Started with a dev credential (see below). |
 | dashboard | 3000 | The money-plane dashboard, a static page served locally. This is the thing you actually look at. |
 | wardryx | 8090 | Policy decision point, seeded with a tiny demo policy scoped to fire-drill identities only. |
@@ -90,19 +90,21 @@ modifies them). Otherwise it shallow-clones what it needs into `~/.stack-up/`.
 
 The money plane has two independent faces, and stack-up runs both:
 
-- The **gateway** (`:4100`) is the live enforcement proxy. Point an
-  OpenAI-compatible client at it and every call is metered against a per-run
-  budget, with a hard 402 when it is spent. Its own view is `GET :4100/v1/runs`.
+- The **gateway** (`:4100`) is the live enforcement proxy. Point an Anthropic
+  Messages API client at it (`POST /v1/messages`) and every call is metered
+  against a per-run budget, with a hard 402 when it is spent. Its own view is
+  `GET :4100/v1/runs`.
 - The **cloud** (`:8080`) is the aggregate control plane, and the **dashboard**
   reads from it. Cloud is populated by anything posting call records to its
-  ungated `POST /v1/ingest` (that is how the mobile app and real reporters feed
-  it). The gateway does not auto-report to cloud; they are separate planes on
-  purpose.
+  ungated `POST /v1/ingest`. stack-up points the gateway at cloud, so your live
+  traffic through `:4100` shows up on the dashboard on its own; the mobile app
+  and other reporters feed the same endpoint.
 
-So the dashboard shows whatever has been ingested into cloud. To keep it from
-starting empty, stack-up seeds a short, clearly-labeled demo dataset (two runs
-under `agent://demo.local/*`); pass `--no-demo` to skip it. Cloud runs
-in-memory here, so that seed is fresh every run and nothing is written to disk.
+So the dashboard shows whatever has been ingested into cloud, your own gateway
+traffic included. So a first look is not empty before you have sent any,
+stack-up also seeds a short, clearly-labeled demo dataset (two runs under
+`agent://demo.local/*`); pass `--no-demo` to skip it. Cloud runs in-memory
+here, so that seed is fresh every run and nothing is written to disk.
 
 To push your own data, POST call records to cloud:
 
@@ -114,7 +116,7 @@ curl -X POST http://127.0.0.1:8080/v1/ingest \
 ```
 
 Refresh the dashboard and your run is there. To exercise the gateway's live
-enforcement instead, send OpenAI-compatible traffic to `:4100` with an
+enforcement instead, send Anthropic Messages API traffic to `:4100` with an
 `x-fuse-run-id` and `x-fuse-budget-usd` and watch it 402 when the budget runs
 out (see the [tokenfuse README](https://github.com/TAIPANBOX/tokenfuse) for
 wiring a real upstream).

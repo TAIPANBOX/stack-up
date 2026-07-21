@@ -10,7 +10,7 @@
 #
 # What it starts by default (everything binds 127.0.0.1 only):
 #
-#   tokenfuse-gateway   :4100   budget-enforcement proxy (OpenAI-compatible)
+#   tokenfuse-gateway   :4100   budget-enforcement proxy (Anthropic Messages API)
 #   tokenfuse-cloud     :8080   money-plane control API (dev credential)
 #   dashboard           :3000   the money-plane dashboard (static, in a browser)
 #   wardryx             :8090   policy decision point (seeded demo policy)
@@ -814,7 +814,7 @@ fi
 
 echo
 log "the stack is up:"
-printf '  %-12s http://127.0.0.1:%s   %s\n' "gateway" "$GATEWAY_PORT" "OpenAI-compatible, enforcing budgets"
+printf '  %-12s http://127.0.0.1:%s   %s\n' "gateway" "$GATEWAY_PORT" "Anthropic Messages API, enforcing budgets"
 printf '  %-12s http://127.0.0.1:%s   %s\n' "cloud"   "$CLOUD_PORT"   "money-plane API (bearer: devkey)"
 [ -n "$DASH_URL" ]                 && printf '  %-12s http://127.0.0.1:%s\n' "dashboard" "$DASH_PORT"
 [ "$WANT_POLICY" -eq 1 ]           && printf '  %-12s http://127.0.0.1:%s   %s\n' "wardryx" "$WARDRYX_PORT" "policy decision point"
@@ -854,7 +854,7 @@ fi
 echo
 log "events:  $EVENTS_DIR"
 log "logs:    $LOGS_DIR"
-log "send it traffic by pointing an agent's OpenAI base URL at the gateway (see README.md)."
+log "send it traffic by pointing an agent's Anthropic base URL at the gateway (see README.md)."
 echo
 log "running. Press Ctrl-C to stop everything cleanly."
 

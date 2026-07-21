@@ -10,7 +10,7 @@
 #
 # What it starts by default (everything binds 127.0.0.1 only):
 #
-#   tokenfuse-gateway   :4100   budget-enforcement proxy (OpenAI-compatible)
+#   tokenfuse-gateway   :4100   budget-enforcement proxy (Anthropic Messages API)
 #   tokenfuse-cloud     :8080   money-plane control API (dev credential)
 #   dashboard           :3000   the money-plane dashboard (static, in a browser)
 #   wardryx             :8090   policy decision point (seeded demo policy)
@@ -492,14 +492,26 @@ YAML
   WARDRYX_APPROVAL_SECRET="$(rand_hex 32)"
 fi
 
-# gateway: enforce mode, agent-event export on, wardryx wired if enabled.
+# gateway: enforce mode, agent-event export on, reporting to the local cloud,
+# wardryx wired if enabled.
 # SIGINT specifically on stop so its buffered Parquet trace flushes.
-log "starting gateway on :$GATEWAY_PORT (enforce)"
+#
+# TOKENFUSE_CLOUD_URL/KEY are what connect the gateway to the cloud we just
+# started: the gateway's CloudSink POSTs every settled call to
+# `{base}/v1/ingest`, and without them it silently ships nowhere. That was the
+# state until 2026-07-21, and it is why this script used to seed a demo
+# dataset "so the dashboard is not empty" - the dashboard COULD not fill up,
+# because the pipe between the two processes it had just started was never
+# connected. Real traffic (18 metered calls) left /v1/runs empty; with these
+# two lines the same traffic shows up as real runs with real spend.
+log "starting gateway on :$GATEWAY_PORT (enforce, reporting to the cloud)"
 if [ -n "$WARDRYX_URL" ]; then
   TOKENFUSE_ADDR="127.0.0.1:$GATEWAY_PORT" \
   TOKENFUSE_MODE="enforce" \
   TOKENFUSE_EVENTS_PATH="$EVENTS_FILE" \
   TOKENFUSE_DATA_DIR="$STACK_UP_HOME/traces/gateway" \
+  TOKENFUSE_CLOUD_URL="http://127.0.0.1:$CLOUD_PORT" \
+  TOKENFUSE_CLOUD_KEY="devkey" \
   TOKENFUSE_WARDRYX_MODE="enforce" \
   TOKENFUSE_WARDRYX_URL="$WARDRYX_URL" \
   TOKENFUSE_WARDRYX_KEY="devkey" \
@@ -510,6 +522,8 @@ else
   TOKENFUSE_MODE="enforce" \
   TOKENFUSE_EVENTS_PATH="$EVENTS_FILE" \
   TOKENFUSE_DATA_DIR="$STACK_UP_HOME/traces/gateway" \
+  TOKENFUSE_CLOUD_URL="http://127.0.0.1:$CLOUD_PORT" \
+  TOKENFUSE_CLOUD_KEY="devkey" \
     "$GATEWAY_BIN" > "$LOGS_DIR/gateway.log" 2>&1 &
 fi
 register gateway "$!" INT
@@ -800,7 +814,7 @@ fi
 
 echo
 log "the stack is up:"
-printf '  %-12s http://127.0.0.1:%s   %s\n' "gateway" "$GATEWAY_PORT" "OpenAI-compatible, enforcing budgets"
+printf '  %-12s http://127.0.0.1:%s   %s\n' "gateway" "$GATEWAY_PORT" "Anthropic Messages API, enforcing budgets"
 printf '  %-12s http://127.0.0.1:%s   %s\n' "cloud"   "$CLOUD_PORT"   "money-plane API (bearer: devkey)"
 [ -n "$DASH_URL" ]                 && printf '  %-12s http://127.0.0.1:%s\n' "dashboard" "$DASH_PORT"
 [ "$WANT_POLICY" -eq 1 ]           && printf '  %-12s http://127.0.0.1:%s   %s\n' "wardryx" "$WARDRYX_PORT" "policy decision point"
@@ -840,7 +854,7 @@ fi
 echo
 log "events:  $EVENTS_DIR"
 log "logs:    $LOGS_DIR"
-log "send it traffic by pointing an agent's OpenAI base URL at the gateway (see README.md)."
+log "send it traffic by pointing an agent's Anthropic base URL at the gateway (see README.md)."
 echo
 log "running. Press Ctrl-C to stop everything cleanly."
 

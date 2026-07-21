@@ -16,10 +16,27 @@
 #   wardryx             :8090   policy decision point (seeded demo policy)
 #   idryx               :8081   identity/access graph (its own :8080 collides)
 #
+# It also installs the four tools that are NOT servers, because "bring it up"
+# cannot mean "start a daemon" for a thing that runs once and exits. For these,
+# up means: the executable is where the rest of the stack looks for it, and its
+# store exists. They are installed, not started:
+#
+#   qryx                crypto inventory (scans a path on demand)
+#   mockryx             fire drills (fires at a gateway on demand)
+#   engram-mcp          agent memory over ~/.taipan/engram.engram (stdio MCP)
+#   verdryx             output quality over ~/.taipan/verdryx.db
+#
 # Flags:
 #   --only money        just the money plane (gateway + cloud + dashboard)
 #   --no-dashboard      skip building/serving the dashboard
 #   --no-demo           do not seed the short demo dataset into cloud
+#   --no-tools          skip the four installed-not-started tools above
+#                       Their stores are created EMPTY and never seeded: they
+#                       are persistent files the rest of the stack reads as
+#                       real, and an empty plane that says so beats demo rows
+#                       that cannot be told apart from a customer's own.
+#   --force-install     replace binaries another tool installed (default: leave
+#                       them alone and use them as they are)
 #   --workspace <dir>   look here for sibling checkouts before cloning
 #                       (default: the directory this repo sits in)
 #   -h, --help          show this and exit
@@ -40,11 +57,42 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GH="https://github.com/TAIPANBOX"
 
 STACK_UP_HOME="${STACK_UP_HOME:-$HOME/.stack-up}"
-BIN_DIR="$STACK_UP_HOME/bin"
+
+# The stack's PUBLISHED home. Not ours: the `taipan` deploy CLI writes it and
+# every consumer of the stack reads it, so this is the one directory an
+# installer must land in to be discoverable. `~/.stack-up` below stays what it
+# always was - this script's own private state (logs, pids, clones, build
+# stamps), none of which anyone else is meant to read.
+#
+# This is why binaries live here rather than under `~/.stack-up/bin`: the tools
+# in wave 2 are not servers with a port to connect to, they are executables
+# something else has to FIND, and the lookup is a fixed path. `qryx` in
+# particular is looked up at exactly `~/.taipan/bin/qryx` with no environment
+# override and no PATH search, so an install anywhere else is an install
+# nobody can see.
+#
+# TAIPAN_HOME is honoured here so the whole layout can be pointed at a scratch
+# directory in a test. Consumers hardcode `~/.taipan`, so overriding it is a
+# testing affordance, not a supported deployment layout.
+TAIPAN_HOME="${TAIPAN_HOME:-$HOME/.taipan}"
+BIN_DIR="$TAIPAN_HOME/bin"
+VENV_DIR="$TAIPAN_HOME/venv"
+ENGRAM_DB="$TAIPAN_HOME/engram.engram"
+VERDRYX_DB="$TAIPAN_HOME/verdryx.db"
+
 EVENTS_DIR="$STACK_UP_HOME/events"
 LOGS_DIR="$STACK_UP_HOME/logs"
 PIDS_DIR="$STACK_UP_HOME/pids"
 REPOS_DIR="$STACK_UP_HOME/repos"
+# Build-freshness stamps and the checksum of every file we installed. These
+# used to sit next to the binaries; they moved because `taipan` stamps its own
+# builds with the SAME `.marker-<name>` filenames in that same directory, so
+# sharing it would have each installer silently validating the other's build.
+MARKERS_DIR="$STACK_UP_HOME/markers"
+# Where a build lands before it is installed, so nothing is ever compiled
+# directly onto a path something else may be reading or executing.
+BUILD_DIR="$STACK_UP_HOME/build"
+LEGACY_BIN_DIR="$STACK_UP_HOME/bin"
 POLICY_FILE="$STACK_UP_HOME/wardryx-policy.yaml"
 EVENTS_FILE="$EVENTS_DIR/tokenfuse.ndjson"
 
@@ -61,9 +109,14 @@ IDRYX_PORT=8081
 ONLY_MONEY=0
 NO_DASHBOARD=0
 NO_DEMO=0
+NO_TOOLS=0
+FORCE_INSTALL=0
 WORKSPACE="${STACK_UP_WORKSPACE:-$(dirname "$SCRIPT_DIR")}"
 
-usage() { sed -n '3,33p' "$0" | sed 's/^# \{0,1\}//'; }
+# Print the comment header above, from the first descriptive line to the last
+# contiguous comment line. Derived rather than a fixed line range, so editing
+# the header can never silently truncate --help halfway through the flags.
+usage() { awk 'NR<3 {next} /^#/ {sub(/^# ?/, ""); print; next} {exit}' "$0"; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -74,6 +127,8 @@ while [ $# -gt 0 ]; do
     --only=money) ONLY_MONEY=1 ;;
     --no-dashboard) NO_DASHBOARD=1 ;;
     --no-demo) NO_DEMO=1 ;;
+    --no-tools) NO_TOOLS=1 ;;
+    --force-install) FORCE_INSTALL=1 ;;
     --workspace) shift; WORKSPACE="${1:-}"; [ -n "$WORKSPACE" ] || { echo "stack-up: --workspace needs a directory" >&2; exit 2; } ;;
     -h|--help) usage; exit 0 ;;
     *) echo "stack-up: unknown option '$1' (try --help)" >&2; exit 2 ;;
@@ -110,6 +165,88 @@ stale_paths() {
   local hit
   hit="$(find "$@" -newer "$marker" 2>/dev/null | head -1)"
   [ -n "$hit" ]
+}
+
+# ---- installing into the shared home -------------------------------------
+#
+# `$BIN_DIR` is the published home (see the layout block), which means we are
+# not its only writer: `taipan up` installs the same binaries there. So we
+# decide by PROVENANCE, never by mtime - a rebuild of old sources is newer than
+# a fresh release, and a `cp` mtime says nothing about which build won. Every
+# file we install has its checksum recorded; on a later run a file whose
+# checksum still matches that record is ours to refresh, and one that does not
+# belongs to somebody else and is left exactly where it is.
+#
+# Leaving it is the right default rather than a cop-out: the deploy CLI
+# outranks the quickstart, the binary is discoverable either way (which is the
+# whole point), and a workspace checkout that happens to be behind cannot
+# silently downgrade a deployed one.
+
+# file_sha <path> -> sha256 hex, empty if it cannot be read
+file_sha() {
+  if have shasum; then shasum -a 256 "$1" 2>/dev/null | awk '{print $1}'
+  elif have sha256sum; then sha256sum "$1" 2>/dev/null | awk '{print $1}'
+  fi
+}
+
+# installed_by_us <name> -> 0 (true) if $BIN_DIR/<name> is exactly the file we
+# installed, i.e. it is there AND its checksum still matches what we recorded.
+#
+# Both halves matter. "The file exists and my build stamp is fresh" is not
+# enough to conclude there is nothing to do: the file sitting there may have
+# been replaced since, in which case the fresh stamp is describing a build that
+# is no longer installed. Checking the bytes is what makes a replaced, edited
+# or corrupted binary get repaired instead of trusted forever.
+installed_by_us() {
+  local target="$BIN_DIR/$1" recorded
+  [ -f "$target" ] || return 1
+  recorded="$(cat "$MARKERS_DIR/$1.sha" 2>/dev/null || true)"
+  [ -n "$recorded" ] && [ "$(file_sha "$target")" = "$recorded" ]
+}
+
+# foreign_binary <name> -> 0 (true) if something is at $BIN_DIR/<name> that we
+# did not put there. --force-install makes this always false, so the caller
+# falls through and treats it as an install to (re)do.
+foreign_binary() {
+  [ "$FORCE_INSTALL" -eq 0 ] || return 1
+  [ -e "$BIN_DIR/$1" ] || return 1
+  ! installed_by_us "$1"
+}
+
+# install_binary <name> <built-file> -> 0 installed, 1 could not install.
+# Always via a temp file in the same directory plus a rename, never a cp over
+# the live path: the memory plane's `engram-mcp` may be running right now as
+# somebody's child process, and overwriting a running executable in place kills
+# it on the next page-in. A rename leaves the running process its old inode.
+install_binary() {
+  local name="$1" src="$2"
+  local target="$BIN_DIR/$name" tmp="$BIN_DIR/.tmp.$name.$$"
+  if ! cp "$src" "$tmp" 2>/dev/null; then
+    warn "$name: could not stage into $BIN_DIR"; rm -f "$tmp"; return 1
+  fi
+  chmod +x "$tmp" 2>/dev/null
+  if ! mv -f "$tmp" "$target" 2>/dev/null; then
+    warn "$name: could not install into $BIN_DIR"; rm -f "$tmp"; return 1
+  fi
+  file_sha "$target" > "$MARKERS_DIR/$name.sha"
+  return 0
+}
+
+# migrate_legacy <name> - earlier versions of this script built into
+# ~/.stack-up/bin. Move a binary left there rather than rebuilding it, so
+# upgrading costs nothing and no second copy is left behind to be run by
+# accident.
+migrate_legacy() {
+  local name="$1"
+  [ -f "$LEGACY_BIN_DIR/$name" ] || return 0
+  [ ! -e "$BIN_DIR/$name" ] || { rm -f "$LEGACY_BIN_DIR/$name"; return 0; }
+  log "$name: moving the build from $LEGACY_BIN_DIR into $BIN_DIR"
+  if mv "$LEGACY_BIN_DIR/$name" "$BIN_DIR/$name" 2>/dev/null; then
+    file_sha "$BIN_DIR/$name" > "$MARKERS_DIR/$name.sha"
+    [ -f "$LEGACY_BIN_DIR/.marker-$name" ] \
+      && mv "$LEGACY_BIN_DIR/.marker-$name" "$MARKERS_DIR/.marker-$name" 2>/dev/null
+  fi
+  return 0
 }
 
 # rand_hex <bytes> -> hex string of 2*bytes chars
@@ -268,6 +405,17 @@ elif ! have go; then
   WANT_POLICY=0; WANT_IDENTITY=0
 fi
 
+# The installed-not-started tools. Split by toolchain, because Go being absent
+# says nothing about Python being absent - each half degrades on its own.
+WANT_GO_TOOLS=1
+WANT_PY_TOOLS=1
+if [ "$ONLY_MONEY" -eq 1 ] || [ "$NO_TOOLS" -eq 1 ]; then
+  WANT_GO_TOOLS=0; WANT_PY_TOOLS=0
+else
+  have go || { warn "go not found: skipping qryx + mockryx (they are written in Go)."; WANT_GO_TOOLS=0; }
+  have python3 || { warn "python3 not found: skipping engram + verdryx (they are written in Python)."; WANT_PY_TOOLS=0; }
+fi
+
 # Mandatory ports must be free; optional ones are dropped if occupied.
 port_busy "$GATEWAY_PORT" && die "port $GATEWAY_PORT (gateway) is already in use."
 port_busy "$CLOUD_PORT"   && die "port $CLOUD_PORT (cloud) is already in use."
@@ -284,7 +432,15 @@ if [ "$WANT_IDENTITY" -eq 1 ] && port_busy "$IDRYX_PORT"; then
   WANT_IDENTITY=0
 fi
 
-mkdir -p "$BIN_DIR" "$EVENTS_DIR" "$LOGS_DIR" "$PIDS_DIR" "$REPOS_DIR"
+mkdir -p "$EVENTS_DIR" "$LOGS_DIR" "$PIDS_DIR" "$REPOS_DIR" "$MARKERS_DIR" "$BUILD_DIR"
+# The shared home may not exist yet, and if we are the ones creating it we
+# create it closed: it accumulates an event stream and, under `taipan`, dev
+# bearer keys. An existing one is never re-chmod'ed - its permissions are its
+# owner's business, not ours.
+if [ ! -d "$TAIPAN_HOME" ]; then
+  mkdir -p "$TAIPAN_HOME" && chmod 700 "$TAIPAN_HOME"
+fi
+mkdir -p "$BIN_DIR" || die "could not create $BIN_DIR"
 : > "$EVENTS_FILE"
 
 trap cleanup INT TERM EXIT
@@ -295,18 +451,24 @@ trap cleanup INT TERM EXIT
 
 TF_REPO="$(locate_repo tokenfuse)" || die "could not fetch tokenfuse."
 
+migrate_legacy tokenfuse-gateway
+migrate_legacy tokenfuse-cloud
 GATEWAY_BIN="$BIN_DIR/tokenfuse-gateway"
 CLOUD_BIN="$BIN_DIR/tokenfuse-cloud"
-if [ -x "$GATEWAY_BIN" ] && [ -x "$CLOUD_BIN" ] \
-   && ! stale_paths "$BIN_DIR/.marker-tokenfuse" "$TF_REPO/crates" "$TF_REPO/Cargo.toml" "$TF_REPO/Cargo.lock"; then
+if foreign_binary tokenfuse-gateway || foreign_binary tokenfuse-cloud; then
+  [ -x "$GATEWAY_BIN" ] && [ -x "$CLOUD_BIN" ] \
+    || die "tokenfuse: $BIN_DIR holds another tool's install but not both binaries; move it aside or pass --force-install."
+  log "tokenfuse: gateway + cloud already installed by another tool; using those"
+elif installed_by_us tokenfuse-gateway && installed_by_us tokenfuse-cloud \
+   && ! stale_paths "$MARKERS_DIR/.marker-tokenfuse" "$TF_REPO/crates" "$TF_REPO/Cargo.toml" "$TF_REPO/Cargo.lock"; then
   log "tokenfuse: gateway + cloud up to date, skipping build"
 else
   log "tokenfuse: building gateway + cloud (Rust release; the first build can take several minutes)"
   ( cd "$TF_REPO" && cargo build --release -p tokenfuse-gateway -p tokenfuse-cloud ) \
     || die "tokenfuse build failed."
-  cp "$TF_REPO/target/release/tokenfuse" "$GATEWAY_BIN" || die "could not copy the gateway binary."
-  cp "$TF_REPO/target/release/tokenfuse-cloud" "$CLOUD_BIN" || die "could not copy the cloud binary."
-  : > "$BIN_DIR/.marker-tokenfuse"
+  install_binary tokenfuse-gateway "$TF_REPO/target/release/tokenfuse" || die "could not install the gateway binary."
+  install_binary tokenfuse-cloud "$TF_REPO/target/release/tokenfuse-cloud" || die "could not install the cloud binary."
+  : > "$MARKERS_DIR/.marker-tokenfuse"
 fi
 
 # Prepare wardryx wiring before the gateway starts, so the gateway can consult
@@ -374,12 +536,12 @@ if [ "$WANT_DASHBOARD" -eq 1 ]; then
   DASH_DIR="$TF_REPO/cloud/dashboard"
   DASH_OUT="$DASH_DIR/out"
   if [ -f "$DASH_OUT/index.html" ] \
-     && ! stale_paths "$BIN_DIR/.marker-dashboard" "$DASH_DIR/app" "$DASH_DIR/next.config.mjs" "$DASH_DIR/package.json"; then
+     && ! stale_paths "$MARKERS_DIR/.marker-dashboard" "$DASH_DIR/app" "$DASH_DIR/next.config.mjs" "$DASH_DIR/package.json"; then
     log "dashboard: static build up to date, skipping"
   else
     log "dashboard: building the static export (npm; the first build downloads dependencies)"
     if ( cd "$DASH_DIR" && npm ci >/dev/null 2>&1 && npm run build >/dev/null 2>&1 ); then
-      : > "$BIN_DIR/.marker-dashboard"
+      : > "$MARKERS_DIR/.marker-dashboard"
     else
       warn "dashboard build failed; continuing without it (API on :$CLOUD_PORT is up). See the note in README.md."
       WANT_DASHBOARD=0
@@ -403,15 +565,19 @@ if [ "$WANT_POLICY" -eq 1 ]; then
   WARDRYX_REPO="$(locate_repo wardryx Wardryx)" || { warn "could not fetch wardryx; skipping."; WANT_POLICY=0; }
 fi
 if [ "$WANT_POLICY" -eq 1 ]; then
+  migrate_legacy wardryx
   WARDRYX_BIN="$BIN_DIR/wardryx"
-  if [ -x "$WARDRYX_BIN" ] && ! stale_paths "$BIN_DIR/.marker-wardryx" "$WARDRYX_REPO/cmd" "$WARDRYX_REPO/internal" "$WARDRYX_REPO/go.mod"; then
+  if foreign_binary wardryx; then
+    log "wardryx: already installed by another tool; using $WARDRYX_BIN"
+  elif installed_by_us wardryx && ! stale_paths "$MARKERS_DIR/.marker-wardryx" "$WARDRYX_REPO/cmd" "$WARDRYX_REPO/internal" "$WARDRYX_REPO/go.mod"; then
     log "wardryx: up to date, skipping build"
   else
     log "wardryx: building (Go)"
-    if ! ( cd "$WARDRYX_REPO" && go build -o "$WARDRYX_BIN" ./cmd/wardryx ); then
+    if ! ( cd "$WARDRYX_REPO" && go build -o "$BUILD_DIR/wardryx" ./cmd/wardryx ) \
+       || ! install_binary wardryx "$BUILD_DIR/wardryx"; then
       warn "wardryx build failed; skipping."; WANT_POLICY=0
     else
-      : > "$BIN_DIR/.marker-wardryx"
+      : > "$MARKERS_DIR/.marker-wardryx"
     fi
   fi
 fi
@@ -433,15 +599,19 @@ if [ "$WANT_IDENTITY" -eq 1 ]; then
   IDRYX_REPO="$(locate_repo idryx Idryx)" || { warn "could not fetch idryx; skipping."; WANT_IDENTITY=0; }
 fi
 if [ "$WANT_IDENTITY" -eq 1 ]; then
+  migrate_legacy idryx
   IDRYX_BIN="$BIN_DIR/idryx"
-  if [ -x "$IDRYX_BIN" ] && ! stale_paths "$BIN_DIR/.marker-idryx" "$IDRYX_REPO/cmd" "$IDRYX_REPO/internal" "$IDRYX_REPO/go.mod"; then
+  if foreign_binary idryx; then
+    log "idryx: already installed by another tool; using $IDRYX_BIN"
+  elif installed_by_us idryx && ! stale_paths "$MARKERS_DIR/.marker-idryx" "$IDRYX_REPO/cmd" "$IDRYX_REPO/internal" "$IDRYX_REPO/go.mod"; then
     log "idryx: up to date, skipping build"
   else
     log "idryx: building (Go)"
-    if ! ( cd "$IDRYX_REPO" && go build -o "$IDRYX_BIN" ./cmd/idryx ); then
+    if ! ( cd "$IDRYX_REPO" && go build -o "$BUILD_DIR/idryx" ./cmd/idryx ) \
+       || ! install_binary idryx "$BUILD_DIR/idryx"; then
       warn "idryx build failed; skipping."; WANT_IDENTITY=0
     else
-      : > "$BIN_DIR/.marker-idryx"
+      : > "$MARKERS_DIR/.marker-idryx"
     fi
   fi
 fi
@@ -451,6 +621,177 @@ if [ "$WANT_IDENTITY" -eq 1 ]; then
     > "$LOGS_DIR/idryx.log" 2>&1 &
   register idryx "$!" TERM
   wait_health idryx "$IDRYX_PORT" "$!" || warn "idryx did not come up. Continuing."
+fi
+
+# --------------------------------------------------------------------------
+# Wave 2 (optional): the four tools that are installed, not started.
+#
+# None of these is a server. qryx scans a path and exits; mockryx fires at a
+# gateway you name and exits; engram is a library plus a CLI plus a stdio-only
+# MCP server over a local file; verdryx is a CLI over a local file. So there is
+# no port to wait on and no process to register. "Up" for them means exactly
+# two things: the executable is at the path the rest of the stack looks for,
+# and its store exists.
+#
+# Each is independently optional and never fatal - a missing Go or Python
+# toolchain, a failed build, or a binary another tool owns all end with a line
+# saying so and the run continuing.
+# --------------------------------------------------------------------------
+
+TOOLS_INSTALLED=()
+
+# install_go_tool <name> [alt-repo-casing...] - build ./cmd/<name> and install.
+install_go_tool() {
+  local name="$1"; shift
+  local repo
+  repo="$(locate_repo "$name" "$@")" || { warn "could not fetch $name; skipping it."; return 1; }
+  migrate_legacy "$name"
+  if foreign_binary "$name"; then
+    log "$name: already installed by another tool; using $BIN_DIR/$name"
+    TOOLS_INSTALLED+=("$name"); return 0
+  fi
+  if installed_by_us "$name" \
+     && ! stale_paths "$MARKERS_DIR/.marker-$name" "$repo/cmd" "$repo/internal" "$repo/go.mod"; then
+    log "$name: up to date, skipping build"
+    TOOLS_INSTALLED+=("$name"); return 0
+  fi
+  log "$name: building (Go)"
+  if ! ( cd "$repo" && go build -o "$BUILD_DIR/$name" "./cmd/$name" ) \
+     || ! install_binary "$name" "$BUILD_DIR/$name"; then
+    warn "$name build failed; skipping it. Its plane will be dark until it is installed."
+    return 1
+  fi
+  : > "$MARKERS_DIR/.marker-$name"
+  TOOLS_INSTALLED+=("$name")
+  return 0
+}
+
+# install_py_tool <name> <console-script> <pip-extras> <import-check>
+#                 [alt-repo-casing...]
+# Install the package into its own virtualenv and put the console script where
+# the stack looks for it.
+#
+# <pip-extras> is appended to the path pip is given, e.g. "[mcp]". It is not
+# cosmetic: engram's MCP server is an OPTIONAL extra, so a plain install
+# produces an `engram-mcp` that exists, is executable, parses `--help` fine,
+# and dies on an ImportError the moment something actually speaks MCP to it.
+#
+# <import-check> is the module that must import afterwards, which is what turns
+# the above from "found out in production" into "found out here". Checking the
+# console script itself is not enough for exactly the reason above: argparse
+# runs before the import that fails.
+#
+# The virtualenv lives under the SHARED home, not under ~/.stack-up, on
+# purpose: a Python console script is a shebang line pointing at the exact
+# interpreter it was installed with, so the venv is part of the delivered
+# artifact, not this installer's scratch space. Putting it in our own state
+# directory would mean deleting our cache silently breaks an executable
+# somebody else is running.
+install_py_tool() {
+  local name="$1" script="$2" extras="$3" import_check="$4"; shift 4
+  local repo venv="$VENV_DIR/$name"
+  repo="$(locate_repo "$name" "$@")" || { warn "could not fetch $name; skipping it."; return 1; }
+  migrate_legacy "$script"
+  if foreign_binary "$script"; then
+    log "$script: already installed by another tool; using $BIN_DIR/$script"
+    TOOLS_INSTALLED+=("$script"); return 0
+  fi
+  # The import check is part of "up to date" on purpose, not just part of a
+  # fresh install: a venv left behind by an older stack-up that installed
+  # without the extras is present, executable and stale-free, and would be
+  # skipped forever while its plane stays broken. Failing the check here drops
+  # through to a reinstall instead.
+  if [ -x "$venv/bin/$script" ] && installed_by_us "$script" \
+     && "$venv/bin/python" -c "import $import_check" >/dev/null 2>&1 \
+     && ! stale_paths "$MARKERS_DIR/.marker-$name" "$repo/pyproject.toml" "$repo/$name"; then
+    log "$name: up to date, skipping install"
+    TOOLS_INSTALLED+=("$script"); return 0
+  fi
+  log "$name: installing into $venv (Python)"
+  if [ ! -x "$venv/bin/python" ] && ! python3 -m venv "$venv" >/dev/null 2>&1; then
+    warn "$name: could not create a virtualenv at $venv; skipping it."; return 1
+  fi
+  "$venv/bin/python" -m pip install --quiet --upgrade pip >/dev/null 2>&1
+  if ! "$venv/bin/python" -m pip install --quiet "${repo}${extras}" >/dev/null 2>&1; then
+    warn "$name: pip install failed; skipping it. Its plane will be dark until it is installed."
+    return 1
+  fi
+  if ! "$venv/bin/python" -c "import $import_check" >/dev/null 2>&1; then
+    warn "$name: installed, but \`import $import_check\` fails, so $script would die the first time it is used; skipping it."
+    return 1
+  fi
+  if ! install_binary "$script" "$venv/bin/$script"; then
+    return 1
+  fi
+  : > "$MARKERS_DIR/.marker-$name"
+  TOOLS_INSTALLED+=("$script")
+  return 0
+}
+
+if [ "$WANT_GO_TOOLS" -eq 1 ]; then
+  # qryx pins a newer Go toolchain than mockryx and downloads it on the first
+  # build, which is slow but automatic (GOTOOLCHAIN=auto is the default).
+  install_go_tool qryx Qryx
+  install_go_tool mockryx Mockryx
+fi
+
+if [ "$WANT_PY_TOOLS" -eq 1 ]; then
+  install_py_tool engram  engram-mcp "[mcp]" mcp     Engram
+  install_py_tool verdryx verdryx   ""       verdryx Verdryx
+fi
+
+# Once everything that could have been migrated has been, retire the old bin
+# directory - but only if it is empty, so anything we did not recognise is
+# left for a human to look at rather than deleted on a guess.
+rmdir "$LEGACY_BIN_DIR" 2>/dev/null
+
+# ---- stores ---------------------------------------------------------------
+#
+# Created with each tool's OWN code, never with hand-written SQL: the schema is
+# then whatever that version of the tool says it is, and stays right when the
+# tool's schema moves. Created only if absent - an existing store may hold real
+# work, and this script has no business deciding otherwise.
+#
+# Created EMPTY, and not seeded. Unlike the demo dataset the money plane gets
+# (which lives in a cloud process that keeps it in memory and forgets it on
+# exit), these are files on disk that the rest of the stack reads as ground
+# truth. Demo rows in them are indistinguishable from a customer's own rows,
+# permanently. An empty plane that says it is empty is the honest outcome; if
+# that reads badly, the fix belongs in whatever renders the empty state.
+
+# ensure_store <label> <venv-name> <path> <python-source-on-stdin>
+ensure_store() {
+  local label="$1" venv="$VENV_DIR/$2" path="$3"
+  if [ -e "$path" ]; then
+    log "$label: store already exists at $path (left untouched)"
+    return 0
+  fi
+  [ -x "$venv/bin/python" ] || return 1
+  if "$venv/bin/python" - "$path" >/dev/null 2>&1; then
+    log "$label: created an empty store at $path"
+  else
+    warn "$label: could not create $path; that plane will stay dark."
+    return 1
+  fi
+}
+
+if [ "$WANT_PY_TOOLS" -eq 1 ] && [ -x "$VENV_DIR/engram/bin/python" ]; then
+  ensure_store memory engram "$ENGRAM_DB" <<'PY'
+import sys
+from engram import Engram
+
+Engram(sys.argv[1])
+PY
+fi
+
+if [ "$WANT_PY_TOOLS" -eq 1 ] && [ -x "$VENV_DIR/verdryx/bin/python" ]; then
+  ensure_store quality verdryx "$VERDRYX_DB" <<'PY'
+import sys
+from verdryx.store import Store
+
+with Store.open(sys.argv[1]):
+    pass
+PY
 fi
 
 # --------------------------------------------------------------------------
@@ -464,6 +805,30 @@ printf '  %-12s http://127.0.0.1:%s   %s\n' "cloud"   "$CLOUD_PORT"   "money-pla
 [ -n "$DASH_URL" ]                 && printf '  %-12s http://127.0.0.1:%s\n' "dashboard" "$DASH_PORT"
 [ "$WANT_POLICY" -eq 1 ]           && printf '  %-12s http://127.0.0.1:%s   %s\n' "wardryx" "$WARDRYX_PORT" "policy decision point"
 [ "$WANT_IDENTITY" -eq 1 ]         && printf '  %-12s http://127.0.0.1:%s   %s\n' "idryx"   "$IDRYX_PORT"   "identity graph (/api/identities)"
+
+if [ "${#TOOLS_INSTALLED[@]}" -gt 0 ]; then
+  echo
+  log "installed, not started (no port to connect to; run them when you need them):"
+  for t in "${TOOLS_INSTALLED[@]}"; do
+    printf '  %-12s %s\n' "$t" "$BIN_DIR/$t"
+  done
+  # Print the store paths even when empty. If a consumer is running with
+  # ENGRAM_MCP_DB or VERDRYX_DB pointed somewhere else, it will read that other
+  # file and these will sit unused - which is invisible unless the paths are
+  # said out loud once.
+  [ -e "$ENGRAM_DB" ]  && printf '  %-12s %s\n' "memory" "$ENGRAM_DB"
+  [ -e "$VERDRYX_DB" ] && printf '  %-12s %s\n' "quality" "$VERDRYX_DB"
+  echo
+  log "those stores start empty and stay empty until you put something in them:"
+  for t in "${TOOLS_INSTALLED[@]}"; do
+    case "$t" in
+      qryx)       printf '  %s scan <path>\n' "$BIN_DIR/qryx" ;;
+      mockryx)    printf '  %s run --gateway http://127.0.0.1:%s\n' "$BIN_DIR/mockryx" "$GATEWAY_PORT" ;;
+      engram-mcp) printf '  %s --db %s        # an agent speaks MCP to this over stdio\n' "$BIN_DIR/engram-mcp" "$ENGRAM_DB" ;;
+      verdryx)    printf '  VERDRYX_DB=%s %s eval --help\n' "$VERDRYX_DB" "$BIN_DIR/verdryx" ;;
+    esac
+  done
+fi
 echo
 if [ -n "$DASH_URL" ]; then
   log "open the dashboard (one click, it remembers the connection):"

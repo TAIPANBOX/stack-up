@@ -34,13 +34,49 @@ The money plane (gateway + cloud + dashboard) is mandatory; the rest degrade
 gracefully. If a toolchain or a port is missing, stack-up says so and brings up
 what it can, rather than failing the whole run.
 
+## What it installs but does not start
+
+Four of the stack's tools are not servers. `qryx` scans a path and exits.
+`mockryx` fires crafted requests at a gateway you name and exits. `engram` is a
+library, a CLI, and a stdio-only MCP server over a local file. `verdryx` is a
+CLI over a local file. There is no port to connect to and nothing to keep
+running, so for these "up" means something different:
+
+| Tool | Installed as | Store |
+|---|---|---|
+| qryx | `~/.taipan/bin/qryx` | none, scans on demand |
+| mockryx | `~/.taipan/bin/mockryx` | none, runs on demand |
+| engram | `~/.taipan/bin/engram-mcp` | `~/.taipan/engram.engram` |
+| verdryx | `~/.taipan/bin/verdryx` | `~/.taipan/verdryx.db` |
+
+`~/.taipan` rather than `~/.stack-up` because that is where the rest of the
+stack looks. It is a fixed path, not a search: `qryx` in particular is looked up
+at exactly `~/.taipan/bin/qryx`, with no environment variable and no `PATH`
+fallback, so a binary installed anywhere else is a binary nothing can find.
+
+The two stores are created **empty** and are never seeded. They are files on
+disk that other tools read as real data, so demo rows in them would be
+indistinguishable from your own, forever. The money plane's demo dataset is
+different and stays on by default: it lives in a process that keeps it in
+memory and forgets it on exit.
+
+stack-up is not the only writer of `~/.taipan/bin` - the `taipan` deploy CLI
+installs the same binaries there. It records a checksum of everything it
+installs, so on a later run it refreshes its own files and leaves anyone else's
+alone, saying so. `--force-install` overrides that.
+
+Skip this whole section with `--no-tools`.
+
 ## Requirements
 
 - **git** and **curl**.
 - **Rust** (stable, via [rustup](https://rustup.rs)) - tokenfuse is built from source.
 - **Node** and **npm** - only for the dashboard (a one-time static build).
-- **python3** - only to serve the dashboard.
-- **Go** - only for wardryx and idryx. Skip them with `--only money`.
+- **python3** - to serve the dashboard, and to install engram and verdryx into
+  their own virtualenvs (3.11+ for those two).
+- **Go** - for wardryx, idryx, mockryx and qryx. Skip them with `--only money`.
+  qryx pins a newer Go toolchain than the others and downloads it on the first
+  build; that is automatic, and slow exactly once.
 
 The first run builds tokenfuse in release mode and can take several minutes.
 After that, builds are cached and startup is seconds. Everything after the
@@ -89,6 +125,8 @@ wiring a real upstream).
 --only money       just the money plane (gateway + cloud + dashboard)
 --no-dashboard     skip building and serving the dashboard
 --no-demo          do not seed the short demo dataset into cloud
+--no-tools         skip the four installed-not-started tools
+--force-install    replace binaries another tool installed
 --workspace <dir>  look here for sibling checkouts before cloning
 -h, --help         show help
 ```
@@ -120,16 +158,38 @@ reachability, policy you actually wrote - follow each service's own README.
 
 ## Layout
 
-State lives under `~/.stack-up/` (override with `STACK_UP_HOME`):
+Two directories, with a clear split: one is the stack's, one is this script's.
+
+Installed artifacts go to the stack's own home, `~/.taipan/`, because that is
+where every other part of the stack looks for them. `taipan` writes here too.
+
+```
+~/.taipan/
+  bin/              the built binaries, and the tool entry points
+  venv/             the virtualenvs engram-mcp and verdryx run out of
+  engram.engram     the memory store (created empty, never seeded)
+  verdryx.db        the quality store (created empty, never seeded)
+```
+
+Everything that is only stack-up's business stays under `~/.stack-up/`
+(override with `STACK_UP_HOME`):
 
 ```
 ~/.stack-up/
-  bin/         cached built binaries + staleness markers
+  build/       where a build lands before it is installed
+  markers/     staleness stamps + a checksum of each file stack-up installed
   repos/       repos stack-up cloned itself (absent if you use sibling checkouts)
   events/      the NDJSON event stream the services write and read
   logs/        one log file per service
   pids/        recorded PIDs, used by down.sh
 ```
+
+Earlier versions kept the binaries in `~/.stack-up/bin`. They are moved on the
+next run rather than rebuilt, and the old directory is left empty.
+
+`down.sh` stops processes; it is not an uninstall. Nothing under `~/.taipan/` is
+removed by it, deliberately: those binaries and stores may be in use by
+something stack-up did not start.
 
 ## License
 

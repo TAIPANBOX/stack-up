@@ -2,6 +2,7 @@
 
 Run the open [TAIPANBOX](https://github.com/TAIPANBOX) agent-governance stack on
 your own machine, natively, with no Docker, and look at it in a browser.
+The stack's home on the web is [it-rat.com](https://it-rat.com).
 
 One command builds (or reuses) the service binaries from source, starts them on
 a fixed loopback port map, waits for each to report healthy, and prints a

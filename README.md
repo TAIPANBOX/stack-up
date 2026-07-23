@@ -145,6 +145,85 @@ Run it in the foreground and Ctrl-C stops everything. If you background it
 
 `down.sh` only signals the PIDs `up.sh` recorded when it launched each service.
 
+## Scheduled governance runs
+
+The stack produces governance signal on its own, but nobody looks at it
+unless something runs it on a schedule. `routines.sh` is that schedule: it
+installs OS-native timers (systemd on Linux, launchd on macOS) for five
+routines, and it is also the thing those timers invoke.
+
+| Routine | Runs (local time) | What it does |
+|---|---|---|
+| `focus-export` | daily 06:07 | `tokenfuse-gateway focus-export` -> a FOCUS-format FinOps CSV built from the gateway's own trace. |
+| `qryx-trend` | daily 06:17 | `qryx scan` (saving evidence) then `qryx trend` -> crypto-inventory compliance-score history. |
+| `verdryx-drift` | daily 06:27 | `verdryx drift` against a baseline you set -> a quality-regression check. |
+| `idryx-detect` | daily 06:37 | `idryx detect` over the tokenfuse event stream -> an identity/access anomaly sweep. |
+| `mockryx-drill` | weekly, Monday 06:47 | a live fire drill against your own gateway. **Opt-in only** - see the warning below. |
+
+```sh
+./routines.sh list                  # one line per routine: installed? last run?
+./routines.sh run <name>            # run one now (this is what the scheduler calls)
+./routines.sh install               # install timers for the four safe routines
+./routines.sh install --with-drill  # also install the weekly drill (see the warning below)
+./routines.sh uninstall             # remove exactly and only what install created
+./routines.sh status                # last record per routine, plus the scheduler's own view
+```
+
+Each routine checks its own preconditions first - the binary it needs, the
+store or file it reads, any required config - before doing anything. A
+precondition that is not met is recorded as `skipped` with the exact reason
+and is not a failure: that is the expected state right after a fresh
+install, before you have pointed it at real binaries and data. Once those
+exist, it runs for real.
+
+### Config
+
+An optional shell fragment at `~/.stack-up/routines/config`, sourced if
+present:
+
+```sh
+ROUTINE_QRYX_SCAN_PATH=/path/to/scan        # qryx-trend's scan target (default: repos/ under STACK_UP_HOME)
+ROUTINE_VERDRYX_BASELINE=some-baseline-id   # required for verdryx-drift; unset means it stays skipped
+ROUTINE_VERDRYX_WINDOW=5                    # verdryx-drift's --window (default: 5)
+ROUTINE_DRILL_SCENARIOS=/path/to/scenarios  # mockryx-drill's scenarios directory
+```
+
+### The record
+
+Every run is recorded twice: appended as one line to
+`~/.stack-up/routines/history.ndjson` (the full history), and written
+atomically to `~/.stack-up/routines/status/<name>.json` (just the latest).
+Both use the same shape:
+
+```json
+{"schema":"stackup.routine-run/v1","routine":"<name>","started_at":"<RFC3339 UTC>","finished_at":"<RFC3339 UTC>","exit_code":N,"status":"ok|findings|skipped|error","reason":"<only for skipped/error>","artifact":"<path under out/, when produced>","summary":"<one line>"}
+```
+
+This is a **stable contract**: the Genaryx console reads it, so its shape
+does not change casually. `status` is one of `ok` (ran, nothing wrong - this
+includes a routine that found something, since finding it is the point of
+running it), `findings` (mockryx-drill specifically: it found a gap, which
+is what a drill is for), `skipped` (a precondition was not met - see
+`reason`), or `error` (a real usage/tool failure - see `reason`).
+
+### The mockryx-drill warning
+
+`mockryx-drill` is never installed by default. `install --with-drill`
+prints this, first, before it installs anything:
+
+Its weekly timer sends real traffic through your local gateway to whatever
+LLM provider is configured there. That traffic can spend that provider's
+money, and the drill is deliberately built to trip your policies - that is
+what a fire drill is for.
+
+### A note on clocks
+
+The timers fire in whatever time zone the OS scheduler uses: local time, on
+the machine's own clock. Every timestamp inside a recorded run
+(`started_at`, `finished_at`) is UTC. If the machine's local time zone is
+not UTC, "06:07 local" and the UTC timestamp on that run's record will not
+line up numerically - that is expected, not a bug.
+
 ## This is a sandbox, not a deployment
 
 - Every service binds to loopback only. Nothing is exposed off your machine.

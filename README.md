@@ -107,6 +107,29 @@ stack-up also seeds a short, clearly-labeled demo dataset (two runs under
 `agent://demo.local/*`); pass `--no-demo` to skip it. Cloud runs in-memory
 here, so that seed is fresh every run and nothing is written to disk.
 
+### Demo fleet
+
+`--with demo-fleet` replaces that short seed with a richer one, for showing
+the console to someone without wiring up any of their own agents:
+
+```sh
+./up.sh --with demo-fleet
+```
+
+It seeds a believable single-org fleet: 16 agents across finance, sre,
+support and data, each with a few runs at realistic per-model cost; semantic-
+cache hits and model-router downgrades so "Governed savings" shows real
+cache and router numbers; and two budget breaches, including one runaway
+agent whose spend climbs run over run until it is caught, so an incident and
+prevented spend show too.
+
+It is the exact same mechanism as the short seed above, just more of it:
+clearly-labeled synthetic data (`agent://demo.local/*`) posted to cloud's
+ungated `/v1/ingest`. Cloud keeps it in memory, so it is fresh on every run
+and gone the moment you stop the stack - never written to disk, never
+presented as real, and off by default. `--no-demo` skips it exactly like it
+skips the short seed.
+
 To push your own data, POST call records to cloud:
 
 ```sh
@@ -128,6 +151,7 @@ wiring a real upstream).
 --only money       just the money plane (gateway + cloud + dashboard)
 --no-dashboard     skip building and serving the dashboard
 --no-demo          do not seed the short demo dataset into cloud
+--with demo-fleet  seed a richer fleet into cloud (see "Demo fleet" below)
 --no-tools         skip the four installed-not-started tools
 --force-install    replace binaries another tool installed
 --workspace <dir>  look here for sibling checkouts before cloning

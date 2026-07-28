@@ -98,8 +98,8 @@ The money plane has two independent faces, and stack-up runs both:
 - The **cloud** (`:8080`) is the aggregate control plane, and the **dashboard**
   reads from it. Cloud is populated by anything posting call records to its
   ungated `POST /v1/ingest`. stack-up points the gateway at cloud, so your live
-  traffic through `:4100` shows up on the dashboard on its own; the mobile app
-  and other reporters feed the same endpoint.
+  traffic through `:4100` shows up on the dashboard on its own; any other
+  reporter feeds the same endpoint.
 
 So the dashboard shows whatever has been ingested into cloud, your own gateway
 traffic included. So a first look is not empty before you have sent any,

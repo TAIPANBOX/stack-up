@@ -27,7 +27,12 @@ out weeks later and trust nothing else we ship.
 ```sh
 shellcheck up.sh down.sh routines.sh
 bash -n up.sh && bash -n down.sh && bash -n routines.sh
+./scripts/loopback-only.sh
 ```
+
+There is no CI in this repository, so `.githooks/pre-push` is the only thing
+that runs these. Turn it on once per clone with
+`git config core.hooksPath .githooks`.
 
 There is no CI in this repo, so the local gates are the only gates.
 
@@ -42,7 +47,7 @@ an absent invariant.
    wardryx 8090, idryx 8081) is fixed and bound to loopback. This is a local
    demonstration, and the README says so; it is explicitly **not a supported
    deployment layout**. Never make it easy to bind elsewhere.
-   *(not enforced)*
+   *(gate: `scripts/loopback-only.sh`)*
 2. **`down.sh` leaves nothing behind.** No listener, no stale pidfile, no
    container, no seeded data pretending to be real. Every service `up.sh`
    starts, `down.sh` stops. *(not enforced)*
@@ -57,10 +62,20 @@ an absent invariant.
 
 ## Decisions that have no gate yet
 
-Every invariant above is held by this file alone. That is the honest state.
+**Held by this file alone: invariants 2, 3, 4 and 5.**
 
-Invariant 1 is the cheapest to gate: fail if any port in the map is bound to
-anything but loopback, which is a grep with a reason attached. Invariants 2 and
+Invariant 1 is now `scripts/loopback-only.sh`, and it is not the grep the
+previous version of this paragraph imagined. That grep was written, reported
+five failures, and all five were wrong: an install hint in a `die` message
+pointing at rustup.rs, the Apple DTD identifier inside a launchd plist, and
+three `URL=""` defaults filled in later. None is an address this launcher
+connects to.
+
+So it resolves ASSIGNMENTS and judges their values. An empty value is a
+placeholder, a `$`-reference is not a literal, and a literal address must be
+loopback; a `curl` or a `--bind` is judged by its target. Prose and identifiers
+are not assignments and are left alone. A matcher that cannot tell an address
+from a sentence should not be deciding. Invariants 2 and
 3 need a real run-twice-then-teardown test, which is the thing most worth
 building here and the thing that most often gets skipped.
 

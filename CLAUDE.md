@@ -30,11 +30,15 @@ bash -n up.sh && bash -n down.sh && bash -n routines.sh
 ./scripts/loopback-only.sh
 ```
 
-There is no CI in this repository, so `.githooks/pre-push` is the only thing
-that runs these. Turn it on once per clone with
-`git config core.hooksPath .githooks`.
+Two callers, one copy of each check: `.github/workflows/gates.yml` and
+`.githooks/pre-push`. Never inline a check into either.
 
-There is no CI in this repo, so the local gates are the only gates.
+**Until 2026-08-01 the hook was the only caller, and that was a hole.**
+`core.hooksPath` is local configuration: it is not committed and does not travel
+with a clone, so these gates enforced nothing for anybody who cloned this repo.
+`.github/workflows/gates.yml` calls the same scripts, one copy each, and is what
+makes them travel. This repo is public, so standard runners cost nothing.
+`git push --no-verify` still skips the local half.
 
 ## Hard invariants
 

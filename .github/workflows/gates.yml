@@ -1,0 +1,22 @@
+# See the note in the sibling repos: these checks used to run only through
+# .githooks/pre-push, which is local configuration and does not travel with a
+# clone. The scripts here are the ONE copy; the hook and this workflow both
+# call them. Public repo, so standard runners cost nothing.
+name: gates
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: the scripts parse
+        run: bash -n up.sh && bash -n down.sh && bash -n routines.sh
+
+      - name: every port stays on loopback
+        run: ./scripts/loopback-only.sh

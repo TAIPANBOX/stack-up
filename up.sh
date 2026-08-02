@@ -15,6 +15,8 @@
 #   dashboard           :3000   the money-plane dashboard (static, in a browser)
 #   wardryx             :8090   policy decision point (seeded demo policy)
 #   idryx               :8081   identity/access graph (its own :8080 collides)
+#   heraldyx            no port the notifier, reading the shared event log and
+#                       writing what it WOULD mail to ~/.stack-up/mail.txt
 #
 # It also installs the four tools that are NOT servers, because "bring it up"
 # cannot mean "start a daemon" for a thing that runs once and exits. For these,
@@ -35,6 +37,12 @@
 #                       agents, cache/router savings, a budget breach, a caught
 #                       runaway) into cloud instead of the short seed above
 #   --no-tools          skip the four installed-not-started tools above
+#   --no-notify         skip heraldyx, the notifier. It sends no mail here in
+#                       any case: on this launcher it is pinned to file mode
+#                       and writes what it WOULD send to
+#                       ~/.stack-up/mail.txt, so you can read the alerts the
+#                       stack would have sent you without a mail server and
+#                       without anything leaving the machine
 #                       Their stores are created EMPTY and never seeded: they
 #                       are persistent files the rest of the stack reads as
 #                       real, and an empty plane that says so beats demo rows
@@ -115,6 +123,7 @@ NO_DASHBOARD=0
 NO_DEMO=0
 DEMO_FLEET=0
 NO_TOOLS=0
+NO_NOTIFY=0
 FORCE_INSTALL=0
 WORKSPACE="${STACK_UP_WORKSPACE:-$(dirname "$SCRIPT_DIR")}"
 
@@ -138,6 +147,7 @@ while [ $# -gt 0 ]; do
       DEMO_FLEET=1 ;;
     --with=demo-fleet) DEMO_FLEET=1 ;;
     --no-tools) NO_TOOLS=1 ;;
+    --no-notify) NO_NOTIFY=1 ;;
     --force-install) FORCE_INSTALL=1 ;;
     --workspace) shift; WORKSPACE="${1:-}"; [ -n "$WORKSPACE" ] || { echo "stack-up: --workspace needs a directory" >&2; exit 2; } ;;
     -h|--help) usage; exit 0 ;;
@@ -643,6 +653,19 @@ elif ! have go; then
   WANT_POLICY=0; WANT_IDENTITY=0
 fi
 
+# The notifier. It binds no port, so nothing here can collide, and it never
+# opens a socket outward: on this launcher it is pinned to file mode, writing
+# what it WOULD send to a file under ~/.stack-up. A local demonstration that
+# can email a stranger's colleagues is not a demonstration, it is a surprise,
+# and invariant 1 of this repo (loopback only) is about exactly that class of
+# reach even though it is written about ports.
+WANT_NOTIFY=1
+if [ "$ONLY_MONEY" -eq 1 ] || [ "$NO_NOTIFY" -eq 1 ]; then
+  WANT_NOTIFY=0
+elif ! have go; then
+  WANT_NOTIFY=0
+fi
+
 # The installed-not-started tools. Split by toolchain, because Go being absent
 # says nothing about Python being absent - each half degrades on its own.
 WANT_GO_TOOLS=1
@@ -882,6 +905,61 @@ if [ "$WANT_IDENTITY" -eq 1 ]; then
 fi
 
 # --------------------------------------------------------------------------
+# The notifier (optional): reads the shared event log, writes what it would
+# mail.
+#
+# It is a server in shape (it runs until stopped) but it listens on nothing, so
+# there is no port to reserve, none to collide with, and no health endpoint to
+# wait on: it is up when its process is alive, and the honest check for that is
+# the process table entry `register` already keeps.
+#
+# HERALDYX_MAIL_FILE, always, on this launcher. Its own default is to send
+# nothing at all, and given an SMTP host it would send for real, but this is the
+# script a stranger runs on their laptop to look at the stack for ten minutes.
+# So the mail path is pinned to a file: everything downstream of "should this
+# person be told" runs exactly as it does on a real box, and the last step
+# writes to disk instead of to somebody's colleagues.
+# --------------------------------------------------------------------------
+
+if [ "$WANT_NOTIFY" -eq 1 ]; then
+  HERALDYX_REPO="$(locate_repo heraldyx Heraldyx)" || { warn "could not fetch heraldyx; skipping."; WANT_NOTIFY=0; }
+fi
+if [ "$WANT_NOTIFY" -eq 1 ]; then
+  migrate_legacy heraldyx
+  HERALDYX_BIN="$BIN_DIR/heraldyx"
+  if foreign_binary heraldyx; then
+    log "heraldyx: already installed by another tool; using $HERALDYX_BIN"
+  elif installed_by_us heraldyx && ! stale_paths "$MARKERS_DIR/.marker-heraldyx" "$HERALDYX_REPO/cmd" "$HERALDYX_REPO/internal" "$HERALDYX_REPO/go.mod"; then
+    log "heraldyx: up to date, skipping build"
+  else
+    log "heraldyx: building (Go)"
+    if ! ( cd "$HERALDYX_REPO" && go build -o "$BUILD_DIR/heraldyx" ./cmd/heraldyx ) \
+       || ! install_binary heraldyx "$BUILD_DIR/heraldyx"; then
+      warn "heraldyx build failed; skipping."; WANT_NOTIFY=0
+    else
+      : > "$MARKERS_DIR/.marker-heraldyx"
+    fi
+  fi
+fi
+if [ "$WANT_NOTIFY" -eq 1 ]; then
+  MAIL_FILE="$STACK_UP_HOME/mail.txt"
+  log "starting heraldyx (writes what it would mail to $MAIL_FILE)"
+  # --from-now=false so the demo dataset seeded moments ago is what it reads.
+  # On a real box the opposite is right, and is the default there: nobody wants
+  # a month of history mailed at once. Here the history IS the demonstration,
+  # and it is four minutes old.
+  HERALDYX_EVENTS="$EVENTS_DIR" \
+  HERALDYX_TO="you@example.com" \
+  HERALDYX_MAIL_FILE="$MAIL_FILE" \
+  HERALDYX_STATE="$STACK_UP_HOME/heraldyx-state.json" \
+  HERALDYX_MIN_SEVERITY="medium" \
+  HERALDYX_BOX="stack-up" \
+    "$HERALDYX_BIN" --from-now=false \
+    > "$LOGS_DIR/heraldyx.log" 2>&1 &
+  register heraldyx "$!" TERM
+fi
+
+# --------------------------------------------------------------------------
 # Wave 2 (optional): the four tools that are installed, not started.
 #
 # None of these is a server. qryx scans a path and exits; mockryx fires at a
@@ -1098,6 +1176,9 @@ fi
 echo
 log "events:  $EVENTS_DIR"
 log "logs:    $LOGS_DIR"
+if [ "$WANT_NOTIFY" -eq 1 ]; then
+  log "mail:    $MAIL_FILE  (what the box would have written to you, unsent)"
+fi
 log "send it traffic by pointing an agent's Anthropic base URL at the gateway (see README.md)."
 echo
 log "running. Press Ctrl-C to stop everything cleanly."

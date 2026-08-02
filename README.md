@@ -30,6 +30,7 @@ Everything binds to `127.0.0.1` only.
 | dashboard | 3000 | The money-plane dashboard, a static page served locally. This is the thing you actually look at. |
 | wardryx | 8090 | Policy decision point, seeded with a tiny demo policy scoped to fire-drill identities only. |
 | idryx | 8081 | Identity/access graph, built from the event stream. Its own default `:8080` collides with cloud, so stack-up runs it on `:8081`. |
+| heraldyx | none | The notifier. Reads the same event stream and decides which events are worth writing to a human about. Here it is pinned to file mode: it writes what it WOULD mail to `~/.stack-up/mail.txt` and opens no socket. `--no-notify` skips it. |
 
 The money plane (gateway + cloud + dashboard) is mandatory; the rest degrade
 gracefully. If a toolchain or a port is missing, stack-up says so and brings up
@@ -75,7 +76,7 @@ Skip this whole section with `--no-tools`.
 - **Node** and **npm** - only for the dashboard (a one-time static build).
 - **python3** - to serve the dashboard, and to install engram and verdryx into
   their own virtualenvs (3.11+ for those two).
-- **Go** - for wardryx, idryx, mockryx and qryx. Skip them with `--only money`.
+- **Go** - for wardryx, idryx, heraldyx, mockryx and qryx. Skip them with `--only money`.
   qryx pins a newer Go toolchain than the others and downloads it on the first
   build; that is automatic, and slow exactly once.
 

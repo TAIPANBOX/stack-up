@@ -61,6 +61,11 @@
 #   ROUTINE_VERDRYX_BASELINE    required for verdryx-drift; no default, so
 #                               that routine stays skipped until you set one
 #   ROUTINE_VERDRYX_WINDOW      verdryx-drift's --window (default: 5)
+#   ROUTINE_VERDRYX_AGENT_ID    which agent the drift check is about. Unset,
+#                               the routine runs and reports as before but
+#                               emits no governance event, because verdryx
+#                               refuses to invent an agent_id and an event
+#                               without one is silently dropped
 #   ROUTINE_DRILL_SCENARIOS     mockryx-drill's scenarios directory
 #
 # ROUTINES_UNIT_DIR overrides where install/uninstall read and write unit
@@ -399,8 +404,25 @@ routine_verdryx_drift() {
   # compare. So "regressed" is status ok here for the same reason as qryx
   # above: the tool's own exit code already treats detecting a regression
   # as success.
+  # Governance events are opt-in twice over, and both halves are needed or
+  # the routine emits nothing while looking like it works.
+  #
+  # verdryx writes `quality_drift` only when the verdict is "regressed", and
+  # only through --events. It also refuses to invent an agent_id: emit() skips
+  # any event whose agent_id is empty rather than fabricating one, which is
+  # correct and silent. So passing --events without --agent-id would wire a
+  # path that can never carry anything, which is worse than leaving it unwired,
+  # because the file would exist and stay empty and an empty journal looks
+  # exactly like a calm fleet.
+  #
+  # Its own file, never appended to the gateway's: one emitter, one journal.
+  # heraldyx reads the directory, so it picks this up with no further wiring.
+  local ev=()
+  if [ -n "${ROUTINE_VERDRYX_AGENT_ID:-}" ]; then
+    ev=(--events "$EVENTS_DIR/verdryx.ndjson" --agent-id "$ROUTINE_VERDRYX_AGENT_ID")
+  fi
   VERDRYX_DB="$db" "$vx" drift --baseline "$ROUTINE_VERDRYX_BASELINE" \
-    --window "${ROUTINE_VERDRYX_WINDOW:-5}" >>"$log" 2>&1
+    --window "${ROUTINE_VERDRYX_WINDOW:-5}" "${ev[@]+"${ev[@]}"}" >>"$log" 2>&1
   local rc=$?
   RESULT_EXIT_CODE=$rc
   if [ "$rc" -eq 0 ]; then

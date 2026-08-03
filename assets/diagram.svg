@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-18 -18 996 396" width="996" height="396" role="img" aria-label="stack-up runs the agent-governance stack natively on one machine with no Docker: six processes on a fixed loopback port map, every one bound to 127.0.0.1 only, and heraldyx pinned to file mode so it writes what it would have mailed and opens no socket. Nothing leaves the laptop, which is what makes it a sandbox rather than a deployment">
+  <title>stack-up: the whole stack on loopback, and nothing leaves the machine</title>
+  <rect x="-18" y="-18" width="996" height="396" rx="16" fill="#0A0E13"/>
+  <rect x="-17.5" y="-17.5" width="995" height="395" rx="15.5" fill="none" stroke="rgba(255,255,255,.09)"/>
+
+  <defs>
+    <marker id="su-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L8 4 L0 8 z" fill="#5A6675"/>
+    </marker>
+  </defs>
+
+  <g font-family="ui-monospace,Menlo" text-anchor="middle">
+
+    <text x="480" y="24" fill="#E9EFF6" font-size="13" font-weight="700">one command, no Docker, and nothing reaches the network</text>
+    <text x="480" y="41" fill="#5A6675" font-size="10">the same binaries the other two deployments run, started as processes and bound where they cannot be reached</text>
+
+    <!-- the machine -->
+    <rect x="8" y="56" width="608" height="266" rx="13" fill="none" stroke="#4493F8" stroke-dasharray="6 4" stroke-width="1.3">
+      <animate attributeName="stroke-opacity" values="1;.45;1" dur="3.6s" repeatCount="indefinite"/>
+    </rect>
+    <text x="312" y="76" fill="#4493F8" font-size="10.5" font-weight="700">your machine, and the boundary is the machine</text>
+
+    <rect x="26" y="88" width="278" height="34" rx="8" fill="#141C27" stroke="#2a3547"/>
+    <text x="120" y="109" fill="#E9EFF6" font-size="10.5" font-weight="700">tokenfuse-gateway</text>
+    <text x="250" y="109" fill="#4493F8" font-size="10">127.0.0.1:4100</text>
+
+    <rect x="26" y="128" width="278" height="34" rx="8" fill="#141C27" stroke="#2a3547"/>
+    <text x="112" y="149" fill="#E9EFF6" font-size="10.5" font-weight="700">tokenfuse-cloud</text>
+    <text x="250" y="149" fill="#4493F8" font-size="10">127.0.0.1:8080</text>
+
+    <rect x="26" y="168" width="278" height="34" rx="8" fill="#141C27" stroke="#2a3547"/>
+    <text x="90" y="189" fill="#E9EFF6" font-size="10.5" font-weight="700">dashboard</text>
+    <text x="250" y="189" fill="#4493F8" font-size="10">127.0.0.1:3000</text>
+
+    <rect x="322" y="88" width="278" height="34" rx="8" fill="#141C27" stroke="#2a3547"/>
+    <text x="378" y="109" fill="#E9EFF6" font-size="10.5" font-weight="700">wardryx</text>
+    <text x="546" y="109" fill="#4493F8" font-size="10">127.0.0.1:8090</text>
+
+    <rect x="322" y="128" width="278" height="34" rx="8" fill="#141C27" stroke="#2a3547"/>
+    <text x="370" y="149" fill="#E9EFF6" font-size="10.5" font-weight="700">idryx</text>
+    <text x="546" y="149" fill="#4493F8" font-size="10">127.0.0.1:8081</text>
+
+    <rect x="322" y="168" width="278" height="34" rx="8" fill="#141C27" stroke="#3FB950"/>
+    <text x="376" y="189" fill="#E9EFF6" font-size="10.5" font-weight="700">heraldyx</text>
+    <text x="546" y="189" fill="#3FB950" font-size="10">no port at all</text>
+
+    <rect x="26" y="212" width="574" height="42" rx="9" fill="#10161F" stroke="#2a3547"/>
+    <text x="313" y="230" fill="#8A97A6" font-size="10">every one of them binds to 127.0.0.1 and nothing else, so a laptop on a cafe network</text>
+    <text x="313" y="245" fill="#8A97A6" font-size="10">does not quietly acquire an enforcement plane anybody else can reach</text>
+
+    <rect x="26" y="264" width="574" height="44" rx="9" fill="#141C27" stroke="#2a3547"/>
+    <text x="313" y="282" fill="#E9EFF6" font-size="10.5" font-weight="700">the money plane is mandatory, the rest degrade gracefully</text>
+    <text x="313" y="298" fill="#8A97A6" font-size="10">a missing toolchain or a taken port is reported, and what can come up does</text>
+
+    <!-- the way out, nailed shut -->
+    <path d="M620 189 L644 189" stroke="#5A6675" stroke-width="1.2" marker-end="url(#su-a)" fill="none"/>
+
+    <rect x="652" y="56" width="300" height="152" rx="12" fill="#10161F" stroke="#3FB950"/>
+    <text x="802" y="77" fill="#3FB950" font-size="10.5" font-weight="700">the one way out, nailed shut</text>
+    <text x="802" y="96" fill="#8A97A6" font-size="10">heraldyx is the only component of the</text>
+    <text x="802" y="110" fill="#8A97A6" font-size="10">stack that can open a connection to</text>
+    <text x="802" y="124" fill="#8A97A6" font-size="10">something outside it. Here it is pinned</text>
+    <text x="802" y="138" fill="#8A97A6" font-size="10">to file mode and opens no socket.</text>
+
+    <rect x="670" y="150" width="264" height="44" rx="8" fill="#0C1119" stroke="#2a3547"/>
+    <text x="802" y="168" fill="#C8D3E0" font-size="9.5">~/.stack-up/mail.txt</text>
+    <text x="802" y="184" fill="#8A97A6" font-size="9">what it WOULD have mailed, written to a file</text>
+
+    <rect x="652" y="220" width="300" height="102" rx="12" fill="#141C27" stroke="#E3B341"/>
+    <text x="802" y="241" fill="#E3B341" font-size="11" font-weight="700">a sandbox, not a deployment</text>
+    <text x="802" y="260" fill="#8A97A6" font-size="10">This is where you learn what the stack</text>
+    <text x="802" y="274" fill="#8A97A6" font-size="10">does. It is not where you govern agents</text>
+    <text x="802" y="288" fill="#8A97A6" font-size="10">that other people depend on.</text>
+    <text x="802" y="308" fill="#5A6675" font-size="9.5">for that: stack-single, or stack-k8s</text>
+
+    <text x="860" y="348" fill="#5A6675" font-size="9.5">github.com/TAIPANBOX/stack-up</text>
+    <text x="230" y="348" fill="#5A6675" font-size="9.5">the same stack, three shapes: your machine, one box, a cluster</text>
+  </g>
+</svg>

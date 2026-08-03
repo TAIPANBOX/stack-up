@@ -9,6 +9,12 @@ a fixed loopback port map, waits for each to report healthy, and prints a
 one-click link to the money-plane dashboard. Press Ctrl-C and it stops cleanly,
 with no orphaned processes.
 
+<div align="center">
+
+<img src="assets/diagram.svg" alt="Six processes on a fixed loopback port map, every one bound to 127.0.0.1 only, with heraldyx pinned to file mode so it writes what it would have mailed and opens no socket. Nothing leaves the machine, which is what makes this a sandbox rather than a deployment" width="960">
+
+</div>
+
 ```sh
 git clone https://github.com/TAIPANBOX/stack-up
 cd stack-up

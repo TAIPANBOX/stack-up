@@ -717,6 +717,11 @@ migrate_legacy tokenfuse-cloud
 GATEWAY_BIN="$BIN_DIR/tokenfuse-gateway"
 CLOUD_BIN="$BIN_DIR/tokenfuse-cloud"
 if foreign_binary tokenfuse-gateway || foreign_binary tokenfuse-cloud; then
+  # A && B || C here is deliberate, not the if-then-else SC2015 warns about:
+  # C is `die`, which exits either way B could make this false (A itself
+  # false, or A true and B false), so there is no case where C runs on
+  # success and no case where it is skipped on failure.
+  # shellcheck disable=SC2015
   [ -x "$GATEWAY_BIN" ] && [ -x "$CLOUD_BIN" ] \
     || die "tokenfuse: $BIN_DIR holds another tool's install but not both binaries; move it aside or pass --force-install."
   log "tokenfuse: gateway + cloud already installed by another tool; using those"
@@ -948,6 +953,15 @@ if [ "$WANT_NOTIFY" -eq 1 ]; then
   # On a real box the opposite is right, and is the default there: nobody wants
   # a month of history mailed at once. Here the history IS the demonstration,
   # and it is four minutes old.
+  #
+  # HERALDYX_MIN_SEVERITY below is "medium", not stack-single's and
+  # stack-k8s's "high": deliberately different, and previously unstated
+  # anywhere. This is the sandbox meant to show a newcomer what an alert
+  # looks like within a few minutes of ./up.sh, so a lower threshold gives
+  # the short demo something to show; stack-single and stack-k8s are real
+  # deployments, where "high" keeps a real operator's inbox quiet until
+  # something serious happens. Same variable, opposite correct default, for
+  # two genuinely different audiences.
   HERALDYX_EVENTS="$EVENTS_DIR" \
   HERALDYX_TO="you@example.com" \
   HERALDYX_MAIL_FILE="$MAIL_FILE" \

@@ -301,7 +301,8 @@ routine_focus_export() {
     return
   fi
 
-  local out="$OUT_DIR/focus-$(date -u +%Y%m%d).csv"
+  local out
+  out="$OUT_DIR/focus-$(date -u +%Y%m%d).csv"
   local log="$LOGS_DIR/focus-export.log"
   : > "$log"
   "$gw" focus-export --traces "$traces_dir" --out "$out" >"$log" 2>&1
@@ -501,7 +502,8 @@ routine_mockryx_drill() {
     return
   fi
 
-  local out="$OUT_DIR/drill-$(date -u +%Y%m%dT%H%M%SZ).json"
+  local out
+  out="$OUT_DIR/drill-$(date -u +%Y%m%dT%H%M%SZ).json"
   local log="$LOGS_DIR/mockryx-drill.log"
   : > "$log"
   # Flags before the positional dir: mockryx's flag set stops parsing at the

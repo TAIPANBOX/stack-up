@@ -15,6 +15,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: shellcheck
+        run: shellcheck up.sh down.sh routines.sh
+
       - name: the scripts parse
         run: bash -n up.sh && bash -n down.sh && bash -n routines.sh
 

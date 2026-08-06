@@ -2,8 +2,9 @@
 #
 # Local gate before anything leaves this machine.
 #
-# This repository has no CI, so this hook is the ONLY thing that runs the gates.
-# A gate nothing calls is a comment with an exit code.
+# .github/workflows/gates.yml calls the same checks in CI; this hook is the
+# local half, and `core.hooksPath` is not committed, so it enforces nothing
+# for anybody who has not run the one-time `git config` below.
 #
 # Install (once):  git config core.hooksPath .githooks
 # Skip (rarely):   git push --no-verify
@@ -29,6 +30,7 @@ step() {
 }
 
 echo "pre-push gate"
+step "shellcheck" "shellcheck up.sh down.sh routines.sh"
 step "shell syntax" "bash -n up.sh && bash -n down.sh && bash -n routines.sh"
 step "loopback only" "./scripts/loopback-only.sh"
 

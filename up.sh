@@ -948,6 +948,15 @@ if [ "$WANT_NOTIFY" -eq 1 ]; then
   # On a real box the opposite is right, and is the default there: nobody wants
   # a month of history mailed at once. Here the history IS the demonstration,
   # and it is four minutes old.
+  #
+  # HERALDYX_MIN_SEVERITY below is "medium", not stack-single's and
+  # stack-k8s's "high": deliberately different, and previously unstated
+  # anywhere. This is the sandbox meant to show a newcomer what an alert
+  # looks like within a few minutes of ./up.sh, so a lower threshold gives
+  # the short demo something to show; stack-single and stack-k8s are real
+  # deployments, where "high" keeps a real operator's inbox quiet until
+  # something serious happens. Same variable, opposite correct default, for
+  # two genuinely different audiences.
   HERALDYX_EVENTS="$EVENTS_DIR" \
   HERALDYX_TO="you@example.com" \
   HERALDYX_MAIL_FILE="$MAIL_FILE" \

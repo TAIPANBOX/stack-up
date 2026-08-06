@@ -717,6 +717,11 @@ migrate_legacy tokenfuse-cloud
 GATEWAY_BIN="$BIN_DIR/tokenfuse-gateway"
 CLOUD_BIN="$BIN_DIR/tokenfuse-cloud"
 if foreign_binary tokenfuse-gateway || foreign_binary tokenfuse-cloud; then
+  # A && B || C here is deliberate, not the if-then-else SC2015 warns about:
+  # C is `die`, which exits either way B could make this false (A itself
+  # false, or A true and B false), so there is no case where C runs on
+  # success and no case where it is skipped on failure.
+  # shellcheck disable=SC2015
   [ -x "$GATEWAY_BIN" ] && [ -x "$CLOUD_BIN" ] \
     || die "tokenfuse: $BIN_DIR holds another tool's install but not both binaries; move it aside or pass --force-install."
   log "tokenfuse: gateway + cloud already installed by another tool; using those"

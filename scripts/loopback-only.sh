@@ -37,10 +37,19 @@ problems = []
 # NAME=value, NAME="value", NAME='value' at the start of a line.
 ASSIGN = re.compile(r'^\s*(?:export\s+)?([A-Z][A-Z0-9_]*)=(?:"([^"]*)"|\'([^\']*)\'|(\S*))\s*$')
 
+# A file that is not there is skipped, and until 2026-08-09 skipping ALL of
+# them was a pass: this printed "every resolved address, bind and connection in
+# the launcher is loopback" and exited 0 on a tree where none of the three
+# existed. Renaming them, or moving the launcher into a subdirectory, is
+# ordinary housekeeping, and either one turned the check that holds invariant 1
+# into a check on nothing while printing a sentence that asserts the opposite.
+seen = 0
+
 for name in ("up.sh", "down.sh", "routines.sh"):
     p = pathlib.Path(name)
     if not p.exists():
         continue
+    seen += 1
     for lineno, line in enumerate(p.read_text().splitlines(), 1):
         if line.lstrip().startswith("#"):
             continue
@@ -49,19 +58,28 @@ for name in ("up.sh", "down.sh", "routines.sh"):
         if m:
             var = m.group(1)
             val = next((g for g in m.groups()[1:] if g is not None), "")
-            if not val or "$" in val:
-                continue  # a placeholder, or a reference resolved elsewhere
+            if not val:
+                continue  # a placeholder filled in later
             if var.endswith(("_URL", "_ADDR", "_HOST", "_BIND")) or "BIND" in var:
-                host = val
-                mu = re.match(r"^https?://([^/:]+)", val)
-                if mu:
-                    host = mu.group(1)
-                else:
-                    host = val.split(":")[0]
-                if not LOOPBACK.match(host):
-                    problems.append(
-                        f"{name}:{lineno} {var}={val} is not loopback"
-                    )
+                # A `$` in the VALUE is not a reason to skip: every real URL in
+                # this launcher is `http://127.0.0.1:$SOMETHING_PORT`, so
+                # skipping on that judged exactly zero assignments and the
+                # branch was decorative. Measured 2026-08-09: two address-shaped
+                # assignments, both skipped, none judged. Changing 127.0.0.1 to
+                # 0.0.0.0 on either line passed cleanly.
+                #
+                # What genuinely cannot be judged is a `$` in the HOST, so that
+                # is what is skipped now, and only that.
+                hosts = re.findall(r"https?://([^/:\s\"']+)", val)
+                if not hosts:
+                    hosts = [val.split(":")[0]]
+                for host in hosts:
+                    if "$" in host:
+                        continue  # the host itself is resolved elsewhere
+                    if not LOOPBACK.match(host):
+                        problems.append(
+                            f"{name}:{lineno} {var}={val} is not loopback ({host})"
+                        )
             continue
 
         # An address actually being connected to, rather than mentioned.
@@ -78,6 +96,12 @@ for name in ("up.sh", "down.sh", "routines.sh"):
                 continue
             if not LOOPBACK.match(host):
                 problems.append(f"{name}:{lineno} binds to {mu.group(1)}")
+
+if seen == 0:
+    print("FAIL: none of up.sh, down.sh or routines.sh is here, so this measured nothing.")
+    print("      It cannot say every address is loopback if it read no address at all.")
+    print("      If the launcher moved or was renamed, this check has to move with it.")
+    raise SystemExit(1)
 
 if problems:
     for x in problems:

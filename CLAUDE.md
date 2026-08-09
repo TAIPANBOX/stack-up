@@ -28,6 +28,7 @@ out weeks later and trust nothing else we ship.
 shellcheck up.sh down.sh routines.sh
 bash -n up.sh && bash -n down.sh && bash -n routines.sh
 ./scripts/loopback-only.sh
+./scripts/gates-have-teeth.sh   # invariant 6; needs a clean tree
 ```
 
 Two callers, one copy of each check: `.github/workflows/gates.yml` and
@@ -51,7 +52,23 @@ an absent invariant.
    wardryx 8090, idryx 8081) is fixed and bound to loopback. This is a local
    demonstration, and the README says so; it is explicitly **not a supported
    deployment layout**. Never make it easy to bind elsewhere.
-   *(gate: `scripts/loopback-only.sh`)*
+   *(gate: `scripts/loopback-only.sh`, and read the next paragraph before
+   trusting the marker's history. Two faults were found in it on 2026-08-09 by
+   invariant 6's harness, and one of them meant this gate had never judged a
+   single address through its main branch.)*
+
+   **What was wrong with it, because a gate's own record is worth having.**
+   The assignment branch skipped any value containing `$`, reasoning that a
+   reference is not a literal. Every real URL in this launcher is
+   `http://127.0.0.1:$SOMETHING_PORT`, so that skip covered all of them:
+   measured, two address-shaped assignments, both skipped, zero judged.
+   Changing `127.0.0.1` to `0.0.0.0` on either line passed cleanly, and that is
+   exactly the edit somebody makes to reach the dashboard from another machine.
+   A `$` in the HOST is what genuinely cannot be judged, and that is now the
+   only thing skipped.
+
+   Separately, a launcher file that is not there was skipped, and skipping all
+   three was a pass: it reported every address loopback having read none.
 2. **`down.sh` leaves nothing behind.** No listener, no stale pidfile, no
    container, no seeded data pretending to be real. Every service `up.sh`
    starts, `down.sh` stops. *(not enforced)*
@@ -63,6 +80,28 @@ an absent invariant.
 5. **Reuse rather than rebuild.** If a binary is already built, use it. A first
    run that takes twenty minutes loses the reader.
    *(not enforced)*
+
+6. **A check must be able to tell "did not fail" from "did not run", and the
+   gate here has been made to fail on purpose to prove it can.** This
+   repository is the sharpest case in the estate for that rule, because the
+   gate it applies to was holding invariant 1, the one property this repo
+   promises a stranger, and it was holding nothing at all.
+
+   Both faults are recorded under invariant 1 above rather than here, because
+   a gate's own history belongs beside the gate.
+   *(gate: `scripts/gates-have-teeth.sh`, 3 cases: one real fault, one
+   non-fault, and one subject taken away. The non-fault carries the three
+   shapes the first version of `loopback-only.sh` got wrong, reporting five
+   failures on a correct tree: a placeholder filled in later, a value that is a
+   reference rather than a literal, and an address inside prose. A gate that
+   flags any of those gets deleted by whoever hits it, and then the real fault
+   goes through.)*
+
+   **What it does not cover.** It cannot test itself. It proves the gate
+   catches the faults named in it, not every fault of that kind. The `curl`,
+   `wget`, `nc` and `--host` branches of the gate have no case here; they were
+   read rather than mutated, and that is a weaker check, stated rather than
+   glossed.
 
 ## Decisions that have no gate yet
 

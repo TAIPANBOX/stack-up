@@ -37,10 +37,19 @@ problems = []
 # NAME=value, NAME="value", NAME='value' at the start of a line.
 ASSIGN = re.compile(r'^\s*(?:export\s+)?([A-Z][A-Z0-9_]*)=(?:"([^"]*)"|\'([^\']*)\'|(\S*))\s*$')
 
+# A file that is not there is skipped, and until 2026-08-09 skipping ALL of
+# them was a pass: this printed "every resolved address, bind and connection in
+# the launcher is loopback" and exited 0 on a tree where none of the three
+# existed. Renaming them, or moving the launcher into a subdirectory, is
+# ordinary housekeeping, and either one turned the check that holds invariant 1
+# into a check on nothing while printing a sentence that asserts the opposite.
+seen = 0
+
 for name in ("up.sh", "down.sh", "routines.sh"):
     p = pathlib.Path(name)
     if not p.exists():
         continue
+    seen += 1
     for lineno, line in enumerate(p.read_text().splitlines(), 1):
         if line.lstrip().startswith("#"):
             continue
@@ -78,6 +87,12 @@ for name in ("up.sh", "down.sh", "routines.sh"):
                 continue
             if not LOOPBACK.match(host):
                 problems.append(f"{name}:{lineno} binds to {mu.group(1)}")
+
+if seen == 0:
+    print("FAIL: none of up.sh, down.sh or routines.sh is here, so this measured nothing.")
+    print("      It cannot say every address is loopback if it read no address at all.")
+    print("      If the launcher moved or was renamed, this check has to move with it.")
+    raise SystemExit(1)
 
 if problems:
     for x in problems:

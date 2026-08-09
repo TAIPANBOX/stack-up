@@ -58,19 +58,28 @@ for name in ("up.sh", "down.sh", "routines.sh"):
         if m:
             var = m.group(1)
             val = next((g for g in m.groups()[1:] if g is not None), "")
-            if not val or "$" in val:
-                continue  # a placeholder, or a reference resolved elsewhere
+            if not val:
+                continue  # a placeholder filled in later
             if var.endswith(("_URL", "_ADDR", "_HOST", "_BIND")) or "BIND" in var:
-                host = val
-                mu = re.match(r"^https?://([^/:]+)", val)
-                if mu:
-                    host = mu.group(1)
-                else:
-                    host = val.split(":")[0]
-                if not LOOPBACK.match(host):
-                    problems.append(
-                        f"{name}:{lineno} {var}={val} is not loopback"
-                    )
+                # A `$` in the VALUE is not a reason to skip: every real URL in
+                # this launcher is `http://127.0.0.1:$SOMETHING_PORT`, so
+                # skipping on that judged exactly zero assignments and the
+                # branch was decorative. Measured 2026-08-09: two address-shaped
+                # assignments, both skipped, none judged. Changing 127.0.0.1 to
+                # 0.0.0.0 on either line passed cleanly.
+                #
+                # What genuinely cannot be judged is a `$` in the HOST, so that
+                # is what is skipped now, and only that.
+                hosts = re.findall(r"https?://([^/:\s\"']+)", val)
+                if not hosts:
+                    hosts = [val.split(":")[0]]
+                for host in hosts:
+                    if "$" in host:
+                        continue  # the host itself is resolved elsewhere
+                    if not LOOPBACK.match(host):
+                        problems.append(
+                            f"{name}:{lineno} {var}={val} is not loopback ({host})"
+                        )
             continue
 
         # An address actually being connected to, rather than mentioned.

@@ -17,6 +17,13 @@
 #   idryx               :8081   identity/access graph (its own :8080 collides)
 #   heraldyx            no port the notifier, reading the shared event log and
 #                       writing what it WOULD mail to ~/.stack-up/mail.txt
+#   scopyx              :4300   governed web egress: agents fetch THROUGH it, and
+#                       every destination is decided by wardryx before anything
+#                       leaves. ./up.sh makes one call through it, to the cloud
+#                       metadata address, which is refused on its address before
+#                       a packet leaves the machine. Read the refusal in
+#                       ~/.stack-up/events/scopyx.ndjson, and the alert it
+#                       raised in ~/.stack-up/mail.txt
 #
 # It also installs the four tools that are NOT servers, because "bring it up"
 # cannot mean "start a daemon" for a thing that runs once and exits. For these,
@@ -47,6 +54,10 @@
 #                       are persistent files the rest of the stack reads as
 #                       real, and an empty plane that says so beats demo rows
 #                       that cannot be told apart from a customer's own.
+#   --no-egress         skip scopyx, the web-egress enforcement point. It binds
+#                       loopback and fetches nothing unless asked; the one call
+#                       ./up.sh makes through it is refused before any packet
+#                       leaves, so it reaches the network never.
 #   --force-install     replace binaries another tool installed (default: leave
 #                       them alone and use them as they are)
 #   --workspace <dir>   look here for sibling checkouts before cloning
@@ -113,6 +124,7 @@ CLOUD_PORT=8080
 DASH_PORT=3000
 WARDRYX_PORT=8090
 IDRYX_PORT=8081
+SCOPYX_PORT=4300
 
 # --------------------------------------------------------------------------
 # Options
@@ -124,6 +136,7 @@ NO_DEMO=0
 DEMO_FLEET=0
 NO_TOOLS=0
 NO_NOTIFY=0
+NO_EGRESS=0
 FORCE_INSTALL=0
 WORKSPACE="${STACK_UP_WORKSPACE:-$(dirname "$SCRIPT_DIR")}"
 
@@ -148,6 +161,7 @@ while [ $# -gt 0 ]; do
     --with=demo-fleet) DEMO_FLEET=1 ;;
     --no-tools) NO_TOOLS=1 ;;
     --no-notify) NO_NOTIFY=1 ;;
+    --no-egress) NO_EGRESS=1 ;;
     --force-install) FORCE_INSTALL=1 ;;
     --workspace) shift; WORKSPACE="${1:-}"; [ -n "$WORKSPACE" ] || { echo "stack-up: --workspace needs a directory" >&2; exit 2; } ;;
     -h|--help) usage; exit 0 ;;
@@ -666,6 +680,22 @@ elif ! have go; then
   WANT_NOTIFY=0
 fi
 
+# The web-egress enforcement point. It binds loopback like everything else here,
+# and unlike the others it is a thing agents call rather than a thing that
+# watches: nothing fetches through it unless something asks it to.
+#
+# It needs the policy plane, and not as a nicety. scopyx fails CLOSED, so with
+# no wardryx to ask it would refuse every fetch with a reason about the network,
+# which is a demonstration of nothing.
+WANT_EGRESS=1
+if [ "$ONLY_MONEY" -eq 1 ] || [ "$NO_EGRESS" -eq 1 ]; then
+  WANT_EGRESS=0
+elif ! have go; then
+  WANT_EGRESS=0
+elif [ "$WANT_POLICY" -eq 0 ]; then
+  WANT_EGRESS=0
+fi
+
 # The installed-not-started tools. Split by toolchain, because Go being absent
 # says nothing about Python being absent - each half degrades on its own.
 WANT_GO_TOOLS=1
@@ -971,6 +1001,93 @@ if [ "$WANT_NOTIFY" -eq 1 ]; then
     "$HERALDYX_BIN" --from-now=false \
     > "$LOGS_DIR/heraldyx.log" 2>&1 &
   register heraldyx "$!" TERM
+fi
+
+# --------------------------------------------------------------------------
+# The web-egress enforcement point.
+#
+# The one plane here that governs what agents do to the OUTSIDE rather than to
+# each other. Everything the box already does, budget, policy, identity, is
+# about the operator's own services; this is about the internet, which is where
+# an agent leaks a customer list or reads a page that tells it what to do next.
+#
+# It binds loopback like everything else, and it is a thing agents CALL rather
+# than a thing that watches, so nothing leaves this machine unless something
+# asks it to. The demonstration below deliberately asks for something that is
+# refused before any packet leaves, so the sandbox shows the product working
+# without reaching the network at all.
+# --------------------------------------------------------------------------
+
+if [ "$WANT_EGRESS" -eq 1 ]; then
+  SCOPYX_REPO="$(locate_repo scopyx Scopyx)" || { warn "could not fetch scopyx; skipping."; WANT_EGRESS=0; }
+fi
+if [ "$WANT_EGRESS" -eq 1 ]; then
+  migrate_legacy scopyx
+  SCOPYX_BIN="$BIN_DIR/scopyx"
+  if foreign_binary scopyx; then
+    log "scopyx: already installed by another tool; using $SCOPYX_BIN"
+  elif installed_by_us scopyx && ! stale_paths "$MARKERS_DIR/.marker-scopyx" "$SCOPYX_REPO/cmd" "$SCOPYX_REPO/internal" "$SCOPYX_REPO/go.mod"; then
+    log "scopyx: up to date, skipping build"
+  else
+    log "scopyx: building (Go)"
+    if ! ( cd "$SCOPYX_REPO" && go build -o "$BUILD_DIR/scopyx" ./cmd/scopyx ) \
+       || ! install_binary scopyx "$BUILD_DIR/scopyx"; then
+      warn "scopyx build failed; skipping."; WANT_EGRESS=0
+    else
+      : > "$MARKERS_DIR/.marker-scopyx"
+    fi
+  fi
+fi
+if [ "$WANT_EGRESS" -eq 1 ]; then
+  # Generated per run rather than fixed in this file. A credential committed to
+  # a public repository is not a credential, and this one is also the agent's
+  # IDENTITY: scopyx derives who is asking from which key was presented,
+  # because that is the only authenticated fact it has.
+  #
+  # `local.invalid` on purpose: RFC 2606 reserves `.invalid`, so a sandbox
+  # identity cannot collide with a real trust domain or be mistaken for one in
+  # a trail somebody keeps.
+  SCOPYX_SECRET="$( set +o pipefail; LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 40 )"
+  SCOPYX_AGENT="agent://local.invalid/demo-agent"
+
+  log "starting scopyx on 127.0.0.1:$SCOPYX_PORT (governed web egress)"
+  # Its own FILE in the shared directory, never another plane's file. There is
+  # no volume boundary on this launcher, so the separation is by filename, and
+  # heraldyx reads the directory rather than any one file, which is why the
+  # alert below arrives at all.
+  SCOPYX_ADDR="127.0.0.1:$SCOPYX_PORT" \
+  SCOPYX_KEYS="$SCOPYX_SECRET=$SCOPYX_AGENT" \
+  SCOPYX_WARDRYX="http://127.0.0.1:$WARDRYX_PORT" \
+  # "devkey", the same placeholder the gateway uses on line 802, and for the
+  # same reason: wardryx on this launcher runs with WARDRYX_KEYS="" and
+  # therefore authenticates nobody. The value is documentation of the SHAPE, so
+  # that a reader moving to stack-single or stack-k8s knows a real credential
+  # goes here. Written as a literal rather than as ${WARDRYX_KEY:-}, which is a
+  # reference to nothing and would read as though it resolved.
+  SCOPYX_WARDRYX_KEY="devkey" \
+  SCOPYX_EVENTS="$EVENTS_DIR/scopyx.ndjson" \
+  SCOPYX_MAX_FETCHES_PER_HOUR=50 \
+    "$SCOPYX_BIN" > "$LOGS_DIR/scopyx.log" 2>&1 &
+  register scopyx "$!" TERM
+
+  # One governed call, so the sandbox SHOWS the thing rather than describing it.
+  #
+  # The destination is the cloud metadata endpoint, and it is chosen because it
+  # is refused on its ADDRESS, before a single packet leaves this machine. A
+  # demonstration that reached the real internet would be a demonstration with a
+  # side effect, and this one has none: no DNS, no socket, no bytes.
+  #
+  # It is also the most useful refusal to show. An agent that can be talked into
+  # fetching 169.254.169.254 reads the cloud credentials of whatever it runs on,
+  # and no policy language contemplates that address, which is why it is refused
+  # by the address rules and not by policy.
+  ( for _ in 1 2 3 4 5 6 7 8 9 10; do
+      curl -fsS -m 2 -o /dev/null -X POST "http://127.0.0.1:$SCOPYX_PORT" \
+        -H "X-Scopyx-Key: $SCOPYX_SECRET" \
+        -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"fetch_url","arguments":{"url":"http://169.254.169.254/latest/meta-data/"}}}' \
+        2>/dev/null && break
+      sleep 0.5
+    done ) >/dev/null 2>&1 || true
 fi
 
 # --------------------------------------------------------------------------

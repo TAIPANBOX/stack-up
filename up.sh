@@ -1055,15 +1055,23 @@ if [ "$WANT_EGRESS" -eq 1 ]; then
   # no volume boundary on this launcher, so the separation is by filename, and
   # heraldyx reads the directory rather than any one file, which is why the
   # alert below arrives at all.
+  # SCOPYX_WARDRYX_KEY is "devkey", the same placeholder the gateway uses on
+  # line 802, and for the same reason: wardryx on this launcher runs with
+  # WARDRYX_KEYS="" and therefore authenticates nobody. The value documents the
+  # SHAPE, so a reader moving to stack-single or stack-k8s knows a real
+  # credential goes here. A literal rather than ${WARDRYX_KEY:-}, which is a
+  # reference to nothing and would read as though it resolved.
+  #
+  # EVERY COMMENT ABOUT THIS BLOCK LIVES ABOVE IT, and that is not style. A
+  # comment after a `\` ENDS the line continuation, so the assignments before it
+  # stop being a command prefix and become ordinary shell variables that the
+  # process never sees. Written the other way, scopyx would have started with no
+  # SCOPYX_WARDRYX at all and refused to run, and `bash -n` would have been
+  # perfectly happy: it is valid shell, it just does something else. shellcheck
+  # caught it as SC2034, "appears unused", which is exactly what it looks like.
   SCOPYX_ADDR="127.0.0.1:$SCOPYX_PORT" \
   SCOPYX_KEYS="$SCOPYX_SECRET=$SCOPYX_AGENT" \
   SCOPYX_WARDRYX="http://127.0.0.1:$WARDRYX_PORT" \
-  # "devkey", the same placeholder the gateway uses on line 802, and for the
-  # same reason: wardryx on this launcher runs with WARDRYX_KEYS="" and
-  # therefore authenticates nobody. The value is documentation of the SHAPE, so
-  # that a reader moving to stack-single or stack-k8s knows a real credential
-  # goes here. Written as a literal rather than as ${WARDRYX_KEY:-}, which is a
-  # reference to nothing and would read as though it resolved.
   SCOPYX_WARDRYX_KEY="devkey" \
   SCOPYX_EVENTS="$EVENTS_DIR/scopyx.ndjson" \
   SCOPYX_MAX_FETCHES_PER_HOUR=50 \

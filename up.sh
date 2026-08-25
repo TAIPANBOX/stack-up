@@ -835,9 +835,35 @@ fi
 # because the pipe between the two processes it had just started was never
 # connected. Real traffic (18 metered calls) left /v1/runs empty; with these
 # two lines the same traffic shows up as real runs with real spend.
-log "starting gateway on :$GATEWAY_PORT (enforce, reporting to the cloud)"
+# TOKENFUSE_ALLOW_STUB is neither optional nor cosmetic: with neither it nor a
+# TOKENFUSE_UPSTREAM, the gateway REFUSES TO START and this launcher dies at
+# "gateway did not come up". tokenfuse made the stub opt-in on 2026-07-25
+# ("gateway: refuse to start rather than invent usage"), because a gateway
+# answering from a built-in stub meters a fixed 1000 input / 500 output tokens
+# as real spend, so both the model answers and the money would be invented.
+# Nothing in this launcher moved with it.
+#
+# It stayed invisible here for a month for the worst possible reason: a gateway
+# binary installed before that day starts perfectly well without either
+# variable, so a maintainer's own laptop kept working while a stranger cloning
+# this repository had their very first command fail. That stranger is the whole
+# audience of this file.
+#
+# taipan hit exactly this, one repository along, and dates its own fix: neither
+# variable set from 2026-07-25 until 2026-08-20. The lesson was learned there
+# and never swept across the estate. `scripts/gateway-decides-its-upstream.sh`
+# is that sweep made mechanical, so the next precondition cannot land the same
+# way.
+#
+# The stub is the right answer HERE and only here. There is no provider
+# credential in a sandbox, every figure this launcher shows is already a labeled
+# demo, and the gateway warns at every start that its numbers are fictional. A
+# deployment that meters real traffic sets TOKENFUSE_UPSTREAM instead, which is
+# what stack-single and stack-k8s do.
+log "starting gateway on :$GATEWAY_PORT (enforce, stub upstream, reporting to the cloud)"
 if [ -n "$WARDRYX_URL" ]; then
   TOKENFUSE_ADDR="127.0.0.1:$GATEWAY_PORT" \
+  TOKENFUSE_ALLOW_STUB="1" \
   TOKENFUSE_MODE="enforce" \
   TOKENFUSE_EVENTS_PATH="$EVENTS_FILE" \
   TOKENFUSE_DATA_DIR="$STACK_UP_HOME/traces/gateway" \
@@ -850,6 +876,7 @@ if [ -n "$WARDRYX_URL" ]; then
     "$GATEWAY_BIN" > "$LOGS_DIR/gateway.log" 2>&1 &
 else
   TOKENFUSE_ADDR="127.0.0.1:$GATEWAY_PORT" \
+  TOKENFUSE_ALLOW_STUB="1" \
   TOKENFUSE_MODE="enforce" \
   TOKENFUSE_EVENTS_PATH="$EVENTS_FILE" \
   TOKENFUSE_DATA_DIR="$STACK_UP_HOME/traces/gateway" \

@@ -35,6 +35,18 @@
 #   engram-mcp          agent memory over ~/.taipan/engram.engram (stdio MCP)
 #   verdryx             output quality over ~/.taipan/verdryx.db
 #
+# After the demo above has run, it also seals a record of what every plane
+# did, because "bring it up" for a governed stack ought to end with something
+# provable rather than a promise that the logs were fine:
+#
+#   trailryx-node       none    the record plane. Reads every *.ndjson file
+#                       under ~/.stack-up/events, maps what it can into a
+#                       sealed, offline-verifiable ledger under
+#                       ~/.stack-up/records, and counts by name what it could
+#                       not map. Read it back with `trailryx-node read --data
+#                       ~/.stack-up/records --all`; check a pack of it offline
+#                       with `trailryx-verify`, no network and no config.
+#
 # Flags:
 #   --only money        just the money plane (gateway + cloud + dashboard)
 #   --no-dashboard      skip building/serving the dashboard
@@ -118,6 +130,18 @@ BUILD_DIR="$STACK_UP_HOME/build"
 LEGACY_BIN_DIR="$STACK_UP_HOME/bin"
 POLICY_FILE="$STACK_UP_HOME/wardryx-policy.yaml"
 EVENTS_FILE="$EVENTS_DIR/tokenfuse.ndjson"
+# The record plane's own data directory. Under the sandbox's home, not
+# ~/.taipan: unlike engram.engram or verdryx.db, nothing else in the stack
+# looks this path up by convention, so it belongs beside events/ and logs/ as
+# this launcher's own state rather than beside the installed binaries.
+RECORDS_DIR="$STACK_UP_HOME/records"
+# The trust domain every demo agent identity in this launcher is minted under
+# (see seed_demo and seed_demo_fleet below). Named once here rather than left
+# as a literal repeated at each call site: the record plane refuses every
+# line whose agent is outside the domain it is given, silently and by name
+# (foreign_trust_domain), so a copy of this string that drifted from the real
+# one would make it import nothing and say nothing was wrong.
+DEMO_TRUST_DOMAIN="demo.local"
 
 GATEWAY_PORT=4100
 CLOUD_PORT=8080
@@ -391,7 +415,7 @@ seed_demo() {
   recs=""
   for i in 1 2 3 4 5 6; do
     off=$(( (7 - i) * 60000 ))
-    recs="$recs{\"ts_millis\":$(( now - off )),\"run_id\":\"demo-support-bot\",\"model\":\"gpt-4o-mini\",\"decision\":\"allow\",\"input_tokens\":$(( 800 + i * 50 )),\"output_tokens\":$(( 200 + i * 20 )),\"cost_microusd\":$(( 1500 + i * 300 )),\"step\":$i,\"agent_id\":\"agent://demo.local/support/tier1\"},"
+    recs="$recs{\"ts_millis\":$(( now - off )),\"run_id\":\"demo-support-bot\",\"model\":\"gpt-4o-mini\",\"decision\":\"allow\",\"input_tokens\":$(( 800 + i * 50 )),\"output_tokens\":$(( 200 + i * 20 )),\"cost_microusd\":$(( 1500 + i * 300 )),\"step\":$i,\"agent_id\":\"agent://$DEMO_TRUST_DOMAIN/support/tier1\"},"
   done
   for i in 1 2 3 4; do
     off=$(( (5 - i) * 45000 ))
@@ -399,7 +423,7 @@ seed_demo() {
     # decisions, so this last step registers as a real budget breach in
     # /v1/savings and /v1/incidents, not just a run with a blocked-looking label.
     dec="allow"; [ "$i" -eq 4 ] && dec="budget_exceeded"
-    recs="$recs{\"ts_millis\":$(( now - off )),\"run_id\":\"demo-runaway\",\"model\":\"gpt-4o\",\"decision\":\"$dec\",\"input_tokens\":$(( 3000 + i * 400 )),\"output_tokens\":$(( 900 + i * 100 )),\"cost_microusd\":$(( 24000 + i * 6000 )),\"step\":$i,\"agent_id\":\"agent://demo.local/batch/crawler\"},"
+    recs="$recs{\"ts_millis\":$(( now - off )),\"run_id\":\"demo-runaway\",\"model\":\"gpt-4o\",\"decision\":\"$dec\",\"input_tokens\":$(( 3000 + i * 400 )),\"output_tokens\":$(( 900 + i * 100 )),\"cost_microusd\":$(( 24000 + i * 6000 )),\"step\":$i,\"agent_id\":\"agent://$DEMO_TRUST_DOMAIN/batch/crawler\"},"
   done
   recs="${recs%,}"
   if curl -fsS -o /dev/null -X POST "http://127.0.0.1:$CLOUD_PORT/v1/ingest" \
@@ -408,6 +432,77 @@ seed_demo() {
     log "seeded a short demo dataset into cloud (two runs) so the dashboard is not empty; pass --no-demo to skip"
   else
     warn "demo seed failed; the dashboard will just start empty."
+  fi
+}
+
+# demo_traffic: a handful of real calls THROUGH the gateway, so the money plane
+# demonstrates itself instead of being described.
+#
+# WHY THIS EXISTS, and it is the reason the record plane looked broken.
+#
+# Everything `seed_demo` and `seed_demo_fleet` produce is POSTed straight to
+# cloud's `/v1/ingest`. That fills the dashboard, and it is honest about being
+# synthetic, but it never touches the gateway, so the gateway never decides
+# anything, so it writes NOTHING to the shared event bus. The record plane reads
+# that bus. A stock `./up.sh` therefore sealed zero records and said so, which
+# was accurate and useless: the one plane whose whole job is to prove what the
+# others did had nothing to prove.
+#
+# So this sends traffic the gateway must rule on. The budget is deliberately
+# small enough that the run crosses it partway: the first calls are allowed and
+# metered, then the Breaker refuses the rest with HTTP 402 and emits
+# `breaker_tripped` on the bus. That refusal is the record worth having, and it
+# is a real one rather than a line somebody wrote into a file: fabricating the
+# event stream is forbidden across this estate, because trailryx, heraldyx and
+# idryx all read it as fact.
+#
+# Measured on this machine 2026-08-25 against the stub upstream: 6 calls on one
+# run at a 0.10 USD cap gives 2 allowed and 4 refused, and the 4 refusals map to
+# 4 records. The stub meters a fixed 1000 input / 500 output tokens per call, so
+# the crossing point is arithmetic rather than luck.
+#
+# The answers are the gateway's own stub and the numbers are fictional, which it
+# warns about at every start. That is the same bargain the rest of this sandbox
+# makes, and the enforcement being demonstrated is real either way: the 402 is
+# decided by the budget ledger, not by the upstream.
+demo_traffic() {
+  # A NEW run id per launcher run, and this is not cosmetic. The record plane's
+  # own contract reads a run as one execution of an agent, so a constant here
+  # would file every sandbox session anybody ever starts under one run: measured
+  # on the second run of this very change, eight refusals from two sessions
+  # twenty-six minutes apart answered a query for one run, and an auditor asking
+  # "what happened in that run" would have been told a story about two.
+  #
+  # rand_hex is already how this launcher mints per-run values (the wardryx
+  # approval secret, the scopyx credential), so this adds no new mechanism.
+  local cap="0.10" run agent="agent://$DEMO_TRUST_DOMAIN/support/tier1"
+  local i allowed=0 refused=0 code
+  run="stackup-demo-$(rand_hex 4)"
+
+  for i in 1 2 3 4 5 6; do
+    code="$(curl -s -o /dev/null -w '%{http_code}' -m 5 \
+      -X POST "http://127.0.0.1:$GATEWAY_PORT/v1/messages" \
+      -H "content-type: application/json" \
+      -H "x-fuse-run-id: $run" \
+      -H "x-fuse-budget-usd: $cap" \
+      -H "x-fuse-agent-id: $agent" \
+      -d '{"model":"claude-3-5-sonnet-20241022","max_tokens":64,"messages":[{"role":"user","content":"stack-up demonstration call"}]}' \
+      2>/dev/null || echo "000")"
+    case "$code" in
+      200) allowed=$(( allowed + 1 )) ;;
+      402) refused=$(( refused + 1 )) ;;
+      # Anything else is neither, and saying so beats reporting a number that
+      # counted a connection failure as enforcement.
+      *) : ;;
+    esac
+  done
+
+  if [ "$refused" -gt 0 ]; then
+    log "governed traffic: $allowed call(s) allowed, then the Breaker refused $refused with HTTP 402 (budget $cap USD, run $run)"
+  elif [ "$allowed" -gt 0 ]; then
+    warn "governed traffic: $allowed call(s) went through and none was refused; the record plane will have less to seal than usual."
+  else
+    warn "governed traffic: the gateway answered nothing; skipping. The record plane will seal whatever the other planes wrote."
   fi
 }
 
@@ -453,11 +548,12 @@ seed_demo_fleet() {
   # stdout: first line is "AGENTS RUNS CALLS" for the summary log line below;
   # every following line is one compact-JSON ingest batch ({"records":[...]}).
   # Posting itself stays plain curl in the loop below, exactly like seed_demo.
-  gen="$(python3 - "$now" <<'PY'
+  gen="$(python3 - "$now" "$DEMO_TRUST_DOMAIN" <<'PY'
 import json
 import sys
 
 now = int(sys.argv[1])
+trust_domain = sys.argv[2]
 MICRO = 1_000_000
 records = []
 
@@ -490,7 +586,7 @@ def agent_calls(team, role, model, base_cost, cost_step, in_base, out_base,
     `count` calls become that blocked decision instead of allow - the
     "caught in the act" moment. Every offset is arithmetic on fixed indices
     and the passed-in `now`; nothing here reads the wall clock or a RNG."""
-    agent = f"agent://demo.local/{team}/{role}"
+    agent = f"agent://{trust_domain}/{team}/{role}"
     runs = len(n_calls_per_run)
     if start_ago_per_run is None:
         # Spread runs across the last ~45 minutes, oldest run first, newest
@@ -696,6 +792,16 @@ elif [ "$WANT_POLICY" -eq 0 ]; then
   WANT_EGRESS=0
 fi
 
+# The record plane. It reads what every plane above wrote, so it is not one of
+# them: --only money skips it the same way it skips wardryx/idryx/heraldyx/
+# scopyx. cargo is already mandatory above (tokenfuse needs it), so there is no
+# separate `have cargo` check here the way there is `have go` below; what is
+# NOT guaranteed is that the sibling repo exists or that this cargo is new
+# enough for it, and both are handled the same way a missing Go tool's repo or
+# a failed build are further down: warn and skip, never die.
+WANT_RECORDS=1
+[ "$ONLY_MONEY" -eq 1 ] && WANT_RECORDS=0
+
 # The installed-not-started tools. Split by toolchain, because Go being absent
 # says nothing about Python being absent - each half degrades on its own.
 WANT_GO_TOOLS=1
@@ -868,6 +974,11 @@ if [ "$NO_DEMO" -eq 0 ]; then
   else
     seed_demo
   fi
+  # After the seed, because the seed fills the dashboard and this fills the
+  # event bus, and the record plane below reads the bus. Both are part of the
+  # demonstration, so both are skipped by --no-demo together: a run that asked
+  # for no demo data must not get demo traffic through the back door.
+  demo_traffic
 fi
 
 # --------------------------------------------------------------------------
@@ -1297,6 +1408,94 @@ PY
 fi
 
 # --------------------------------------------------------------------------
+# Trailryx (optional): the estate's record plane. Everything above this line
+# either is a plane being governed or produced the demo traffic describing
+# it; this is the one thing that reads what they all just did and seals it,
+# which is why it runs last rather than beside any of them.
+#
+# It is a ONE-SHOT import here, so a fresh clone ends with a sealed, provable
+# record within the same run that produced the data. routines.sh also has a
+# "trailryx-seal" routine that runs the identical command on a timer, for
+# events that arrive after this run's demo (real gateway traffic, a later
+# scopyx call). Both exist because they answer different questions: "does
+# ./up.sh end with a record" is this block, "does the record stay current
+# afterwards" is the routine. Running both against the same file is safe by
+# design: the importer remembers where it stopped in each file and takes
+# only what is new, so a second call that finds nothing new costs a file read
+# and says so, not a duplicate.
+# --------------------------------------------------------------------------
+
+if [ "$WANT_RECORDS" -eq 1 ]; then
+  TRAILRYX_REPO="$(locate_repo trailryx Trailryx)" || { warn "could not fetch trailryx; skipping the record plane."; WANT_RECORDS=0; }
+fi
+if [ "$WANT_RECORDS" -eq 1 ]; then
+  migrate_legacy trailryx-node
+  migrate_legacy trailryx-verify
+  NODE_BIN="$BIN_DIR/trailryx-node"
+  VERIFY_BIN="$BIN_DIR/trailryx-verify"
+  if foreign_binary trailryx-node || foreign_binary trailryx-verify; then
+    # Same shape as tokenfuse's own pair-check above, softened from `die` to
+    # `warn`: tokenfuse is mandatory and this plane is not, so a stranger
+    # missing one binary of the pair should lose the record plane, not the run.
+    if [ -x "$NODE_BIN" ] && [ -x "$VERIFY_BIN" ]; then
+      log "trailryx: node + verify already installed by another tool; using those"
+    else
+      warn "trailryx: $BIN_DIR holds another tool's install but not both binaries; skipping the record plane (pass --force-install to replace it)."
+      WANT_RECORDS=0
+    fi
+  elif installed_by_us trailryx-node && installed_by_us trailryx-verify \
+     && ! stale_paths "$MARKERS_DIR/.marker-trailryx" "$TRAILRYX_REPO/crates" "$TRAILRYX_REPO/Cargo.toml" "$TRAILRYX_REPO/Cargo.lock"; then
+    log "trailryx: node + verify up to date, skipping build"
+  else
+    log "trailryx: building node + verify (Rust release; core and verifier take zero third-party dependencies, so this never reaches the network)"
+    if ! ( cd "$TRAILRYX_REPO" && cargo build --release -p trailryx-node -p trailryx-verify ) \
+       || ! install_binary trailryx-node "$TRAILRYX_REPO/target/release/trailryx-node" \
+       || ! install_binary trailryx-verify "$TRAILRYX_REPO/target/release/trailryx-verify"; then
+      warn "trailryx build failed; skipping the record plane. Everything above is unaffected."
+      WANT_RECORDS=0
+    else
+      : > "$MARKERS_DIR/.marker-trailryx"
+    fi
+  fi
+fi
+
+RECORDS_WRITTEN=0
+RECORDS_LOST=0
+RECORDS_SEALED=0
+if [ "$WANT_RECORDS" -eq 1 ] && ! mkdir -p "$RECORDS_DIR"; then
+  warn "trailryx: could not create $RECORDS_DIR; skipping the record plane."
+  WANT_RECORDS=0
+fi
+if [ "$WANT_RECORDS" -eq 1 ]; then
+  log "sealing a record of this run into $RECORDS_DIR (trust domain $DEMO_TRUST_DOMAIN)"
+  : > "$LOGS_DIR/trailryx.log"
+  # Every *.ndjson file in the shared directory, not just tokenfuse's own:
+  # "what the other planes did" means wardryx's and scopyx's event logs too,
+  # the same directory heraldyx already reads as a whole for the same reason.
+  shopt -s nullglob
+  for ev in "$EVENTS_DIR"/*.ndjson; do
+    out="$("$NODE_BIN" events --file "$ev" --data "$RECORDS_DIR" --trust-domain "$DEMO_TRUST_DOMAIN" --seal-records 500 2>&1)"
+    rc=$?
+    { printf -- '--- %s ---\n' "$ev"; printf '%s\n' "$out"; } >> "$LOGS_DIR/trailryx.log"
+    if [ "$rc" -ne 0 ]; then
+      warn "trailryx: importing $(basename "$ev") failed (see $LOGS_DIR/trailryx.log)"
+      continue
+    fi
+    # Parsed from trailryx-node's own report line rather than re-derived, so
+    # this total can never disagree with what the tool itself printed. The
+    # "refused:" line is always printed, zeroes included, which is what makes
+    # summing it safe even when nothing new was in a file.
+    w="$(printf '%s\n' "$out" | sed -n 's/.*, \([0-9][0-9]*\) record(s) written,.*/\1/p' | head -n1)"
+    l="$(printf '%s\n' "$out" | awk '/^  refused:/ { s=0; for (i=3;i<=NF;i+=2) s+=$i; print s; exit }')"
+    n="$(printf '%s\n' "$out" | grep -c '^sealed ')"
+    RECORDS_WRITTEN=$((RECORDS_WRITTEN + ${w:-0}))
+    RECORDS_LOST=$((RECORDS_LOST + ${l:-0}))
+    RECORDS_SEALED=$((RECORDS_SEALED + ${n:-0}))
+  done
+  shopt -u nullglob
+fi
+
+# --------------------------------------------------------------------------
 # Summary + hold
 # --------------------------------------------------------------------------
 
@@ -1344,6 +1543,16 @@ log "events:  $EVENTS_DIR"
 log "logs:    $LOGS_DIR"
 if [ "$WANT_NOTIFY" -eq 1 ]; then
   log "mail:    $MAIL_FILE  (what the box would have written to you, unsent)"
+fi
+if [ "$WANT_RECORDS" -eq 1 ]; then
+  echo
+  log "record:  $RECORDS_WRITTEN record(s) sealed across $RECORDS_SEALED segment(s) in $RECORDS_DIR"
+  log "         $RECORDS_LOST line(s) produced no record (trailryx-agentevent documents why; this is expected, not an error)"
+  log "read it back with a completeness proof:"
+  printf '  %s read --data %s --all\n' "$NODE_BIN" "$RECORDS_DIR"
+  log "pack it and check it offline, no network, no config, no state:"
+  printf '  %s read --data %s --all --pack %s/trailryx.pack\n' "$NODE_BIN" "$RECORDS_DIR" "$RECORDS_DIR"
+  printf '  %s %s/trailryx.pack\n' "$VERIFY_BIN" "$RECORDS_DIR"
 fi
 log "send it traffic by pointing an agent's Anthropic base URL at the gateway (see README.md)."
 echo

@@ -4,13 +4,15 @@
 # work (not the agents themselves).
 #
 # The stack produces governance signal on its own: a FinOps export, a crypto-
-# inventory trend, a quality-drift check, an identity-anomaly sweep, and (opt
-# in) a fire drill. Nobody looks at these unless something runs them on a
-# schedule, so this script is that schedule: it installs OS-native timers
-# (systemd on Linux, launchd on macOS) that each invoke `routines.sh run
-# <name>` at a fixed time, and it is also the thing those timers invoke.
+# inventory trend, a quality-drift check, an identity-anomaly sweep, a sealed
+# record of it all, and (opt in) a fire drill. Nobody looks at these unless
+# something runs them on a schedule, so this script is that schedule: it
+# installs OS-native timers (systemd on Linux, launchd on macOS) that each
+# invoke `routines.sh run <name>` at a fixed time, and it is also the thing
+# those timers invoke.
 #
-# Routines (daily, staggered five minutes apart so they never collide):
+# Routines (staggered ten minutes apart in the 06:xx hour so they never
+# collide; each one's own cadence, daily or weekly, is listed below):
 #
 #   focus-export     06:07  tokenfuse-gateway focus-export -> a FOCUS-format
 #                            FinOps CSV from the gateway's own Parquet trace
@@ -27,13 +29,20 @@
 #                            provider's money, and it is deliberately built
 #                            to trip your policies -- that is what a drill
 #                            is for. Never installed unless you ask for it.
+#   trailryx-seal    06:57  trailryx-node events over every *.ndjson file in
+#                            the shared event directory -> a sealed, offline-
+#                            verifiable record of what the other routines,
+#                            and the rest of the stack, did. It runs last in
+#                            the hour on purpose: verdryx-drift above is the
+#                            one other routine that can write a fresh event,
+#                            and this has to run after it to seal it same day.
 #
 # Subcommands:
 #   list               one line per routine: installed as a timer? last run?
 #   run <name>         run one routine now and record the result. This is
 #                      the entrypoint the OS scheduler invokes; safe to run
 #                      by hand too.
-#   install            install timers for the four safe routines above
+#   install            install timers for the five safe routines above
 #     [--with-drill]   also install the mockryx-drill timer (prints the
 #                      warning above again, first, before touching anything)
 #   uninstall          remove exactly and only what install created, tracked
@@ -96,6 +105,8 @@ BIN_DIR="$TAIPAN_HOME/bin"
 EVENTS_DIR="$STACK_UP_HOME/events"
 # keep in sync with up.sh
 EVENTS_FILE="$EVENTS_DIR/tokenfuse.ndjson"
+RECORDS_DIR="$STACK_UP_HOME/records"     # keep in sync with up.sh
+DEMO_TRUST_DOMAIN="demo.local"           # keep in sync with up.sh
 
 ROUTINES_DIR="$STACK_UP_HOME/routines"
 HISTORY_FILE="$ROUTINES_DIR/history.ndjson"
@@ -105,11 +116,11 @@ LOGS_DIR="$ROUTINES_DIR/logs"
 CONFIG_FILE="$ROUTINES_DIR/config"
 INSTALLED_MANIFEST="$ROUTINES_DIR/installed.txt"
 
-# All five routines, and the four considered safe to install by default.
+# All six routines, and the five considered safe to install by default.
 # mockryx-drill is opt-in only (--with-drill) and is deliberately never in
 # DEFAULT_ROUTINES.
-ROUTINE_NAMES=(focus-export qryx-trend verdryx-drift idryx-detect mockryx-drill)
-DEFAULT_ROUTINES=(focus-export qryx-trend verdryx-drift idryx-detect)
+ROUTINE_NAMES=(focus-export qryx-trend verdryx-drift idryx-detect mockryx-drill trailryx-seal)
+DEFAULT_ROUTINES=(focus-export qryx-trend verdryx-drift idryx-detect trailryx-seal)
 
 # --------------------------------------------------------------------------
 # Small helpers (verbatim from up.sh/down.sh, so every stack-up script logs
@@ -164,6 +175,7 @@ routine_minute() {
     verdryx-drift) echo 27 ;;
     idryx-detect)  echo 37 ;;
     mockryx-drill) echo 47 ;;
+    trailryx-seal) echo 57 ;;
   esac
 }
 
@@ -264,7 +276,7 @@ PY
 }
 
 # --------------------------------------------------------------------------
-# The five routines. Each checks its own preconditions and, if any are
+# The six routines. Each checks its own preconditions and, if any are
 # unmet, records "skipped" with an exact reason and returns -- a skip is not
 # a failure. Every real invocation writes its output to its own truncated
 # log ($LOGS_DIR/<name>.log) first, then the routine derives its summary by
@@ -522,6 +534,104 @@ routine_mockryx_drill() {
   esac
 }
 
+# trailryx-seal: the record plane's own timer. up.sh already runs this exact
+# command once, right after the demo; this is what keeps the record current
+# for events that arrive afterwards (real gateway traffic, a later scopyx
+# call, a verdryx-drift regression two routines up in this same hour). It is
+# safe to run right after up.sh's own import, or after a run that found
+# nothing new: the importer remembers its position per file and a file it has
+# already read in full costs one read and reports "nothing new", not a
+# duplicate.
+routine_trailryx_seal() {
+  local node="$BIN_DIR/trailryx-node" verify="$BIN_DIR/trailryx-verify"
+  if [ ! -x "$node" ] || [ ! -x "$verify" ]; then
+    RESULT_STATUS=skipped; RESULT_EXIT_CODE=0
+    RESULT_REASON="missing executable $node or $verify"
+    return
+  fi
+
+  shopt -s nullglob
+  local files=("$EVENTS_DIR"/*.ndjson)
+  shopt -u nullglob
+  if [ "${#files[@]}" -eq 0 ]; then
+    RESULT_STATUS=skipped; RESULT_EXIT_CODE=0
+    RESULT_REASON="no event files in $EVENTS_DIR yet"
+    return
+  fi
+
+  # Best-effort across files, exactly like up.sh's own one-shot import: one
+  # unreadable file (permissions, a disk full mid-write) is that file's
+  # problem, not a reason to leave every other file's new events unsealed.
+  local log="$LOGS_DIR/trailryx-seal.log"
+  : > "$log"
+  local written=0 lost=0 sealed=0 failed=0
+  local f out rc w l n
+  for f in "${files[@]}"; do
+    out="$("$node" events --file "$f" --data "$RECORDS_DIR" --trust-domain "$DEMO_TRUST_DOMAIN" --seal-records 500 2>&1)"
+    rc=$?
+    { printf -- '--- %s ---\n' "$f"; printf '%s\n' "$out"; } >> "$log"
+    if [ "$rc" -ne 0 ]; then
+      failed=$((failed + 1))
+      continue
+    fi
+    w="$(printf '%s\n' "$out" | sed -n 's/.*, \([0-9][0-9]*\) record(s) written,.*/\1/p' | head -n1)"
+    l="$(printf '%s\n' "$out" | awk '/^  refused:/ { s=0; for (i=3;i<=NF;i+=2) s+=$i; print s; exit }')"
+    n="$(printf '%s\n' "$out" | grep -c '^sealed ')"
+    written=$((written + ${w:-0}))
+    lost=$((lost + ${l:-0}))
+    sealed=$((sealed + ${n:-0}))
+  done
+
+  if [ ! -d "$RECORDS_DIR" ]; then
+    # Every file was empty or unreadable, so the plane was never opened.
+    # Not a failure by itself: a calm fleet imports nothing, same as
+    # focus-export's own empty trace above.
+    RESULT_EXIT_CODE=0
+    if [ "$failed" -gt 0 ]; then
+      RESULT_STATUS=error
+      RESULT_REASON="$failed of ${#files[@]} file(s) could not be read; see $log"
+    else
+      RESULT_STATUS=ok
+      RESULT_SUMMARY="0 record(s) written, nothing to pack yet"
+    fi
+    return
+  fi
+
+  # A fresh pack every run, verified before this routine claims success, so
+  # the daily record is proof the ledger still holds together and not just a
+  # claim that the import command exited zero.
+  local pack
+  pack="$OUT_DIR/trailryx-$(date -u +%Y%m%dT%H%M%SZ).pack"
+  local pack_out pack_rc
+  pack_out="$("$node" read --data "$RECORDS_DIR" --all --pack "$pack" 2>&1)"
+  pack_rc=$?
+  printf '%s\n' "$pack_out" >> "$log"
+  if [ "$pack_rc" -ne 0 ] || [ ! -f "$pack" ]; then
+    RESULT_STATUS=error; RESULT_EXIT_CODE=$pack_rc
+    RESULT_REASON="trailryx-node read --pack failed: $(printf '%s\n' "$pack_out" | tail -n1)"
+    return
+  fi
+
+  local verify_out verify_rc
+  verify_out="$("$verify" "$pack" 2>&1)"
+  verify_rc=$?
+  printf '%s\n' "$verify_out" >> "$log"
+  RESULT_EXIT_CODE=$verify_rc
+  RESULT_ARTIFACT="out/$(basename "$pack")"
+  if [ "$verify_rc" -eq 0 ] && [ "$failed" -eq 0 ]; then
+    RESULT_STATUS=ok
+    RESULT_SUMMARY="$written record(s) written, $sealed segment(s) sealed, $lost line(s) produced none; pack verified"
+  elif [ "$verify_rc" -eq 0 ]; then
+    RESULT_STATUS=error
+    RESULT_REASON="$failed of ${#files[@]} file(s) could not be read; see $log"
+    RESULT_SUMMARY="$written record(s) written despite $failed unreadable file(s); pack verified"
+  else
+    RESULT_STATUS=error
+    RESULT_REASON="a pack this routine just wrote did not verify: $(printf '%s\n' "$verify_out" | tail -n1)"
+    RESULT_SUMMARY="$written record(s) written; VERIFY FAILED"
+  fi
+}
+
 # --------------------------------------------------------------------------
 # run <name>
 # --------------------------------------------------------------------------
@@ -556,6 +666,7 @@ cmd_run() {
     verdryx-drift) routine_verdryx_drift ;;
     idryx-detect)  routine_idryx_detect ;;
     mockryx-drill) routine_mockryx_drill ;;
+    trailryx-seal) routine_trailryx_seal ;;
   esac
 
   finished="$(now_rfc3339)"
@@ -833,7 +944,7 @@ cmd_install() {
     warn "through your local gateway to whatever LLM provider is configured"
     warn "there. That traffic can spend that provider's money, and the drill is"
     warn "deliberately built to trip your policies -- that is what a fire drill"
-    warn "is for. Installing its timer alongside the four safe routines."
+    warn "is for. Installing its timer alongside the five safe routines."
   fi
 
   ensure_dirs

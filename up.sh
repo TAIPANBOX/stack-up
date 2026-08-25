@@ -435,6 +435,77 @@ seed_demo() {
   fi
 }
 
+# demo_traffic: a handful of real calls THROUGH the gateway, so the money plane
+# demonstrates itself instead of being described.
+#
+# WHY THIS EXISTS, and it is the reason the record plane looked broken.
+#
+# Everything `seed_demo` and `seed_demo_fleet` produce is POSTed straight to
+# cloud's `/v1/ingest`. That fills the dashboard, and it is honest about being
+# synthetic, but it never touches the gateway, so the gateway never decides
+# anything, so it writes NOTHING to the shared event bus. The record plane reads
+# that bus. A stock `./up.sh` therefore sealed zero records and said so, which
+# was accurate and useless: the one plane whose whole job is to prove what the
+# others did had nothing to prove.
+#
+# So this sends traffic the gateway must rule on. The budget is deliberately
+# small enough that the run crosses it partway: the first calls are allowed and
+# metered, then the Breaker refuses the rest with HTTP 402 and emits
+# `breaker_tripped` on the bus. That refusal is the record worth having, and it
+# is a real one rather than a line somebody wrote into a file: fabricating the
+# event stream is forbidden across this estate, because trailryx, heraldyx and
+# idryx all read it as fact.
+#
+# Measured on this machine 2026-08-25 against the stub upstream: 6 calls on one
+# run at a 0.10 USD cap gives 2 allowed and 4 refused, and the 4 refusals map to
+# 4 records. The stub meters a fixed 1000 input / 500 output tokens per call, so
+# the crossing point is arithmetic rather than luck.
+#
+# The answers are the gateway's own stub and the numbers are fictional, which it
+# warns about at every start. That is the same bargain the rest of this sandbox
+# makes, and the enforcement being demonstrated is real either way: the 402 is
+# decided by the budget ledger, not by the upstream.
+demo_traffic() {
+  # A NEW run id per launcher run, and this is not cosmetic. The record plane's
+  # own contract reads a run as one execution of an agent, so a constant here
+  # would file every sandbox session anybody ever starts under one run: measured
+  # on the second run of this very change, eight refusals from two sessions
+  # twenty-six minutes apart answered a query for one run, and an auditor asking
+  # "what happened in that run" would have been told a story about two.
+  #
+  # rand_hex is already how this launcher mints per-run values (the wardryx
+  # approval secret, the scopyx credential), so this adds no new mechanism.
+  local cap="0.10" run agent="agent://$DEMO_TRUST_DOMAIN/support/tier1"
+  local i allowed=0 refused=0 code
+  run="stackup-demo-$(rand_hex 4)"
+
+  for i in 1 2 3 4 5 6; do
+    code="$(curl -s -o /dev/null -w '%{http_code}' -m 5 \
+      -X POST "http://127.0.0.1:$GATEWAY_PORT/v1/messages" \
+      -H "content-type: application/json" \
+      -H "x-fuse-run-id: $run" \
+      -H "x-fuse-budget-usd: $cap" \
+      -H "x-fuse-agent-id: $agent" \
+      -d '{"model":"claude-3-5-sonnet-20241022","max_tokens":64,"messages":[{"role":"user","content":"stack-up demonstration call"}]}' \
+      2>/dev/null || echo "000")"
+    case "$code" in
+      200) allowed=$(( allowed + 1 )) ;;
+      402) refused=$(( refused + 1 )) ;;
+      # Anything else is neither, and saying so beats reporting a number that
+      # counted a connection failure as enforcement.
+      *) : ;;
+    esac
+  done
+
+  if [ "$refused" -gt 0 ]; then
+    log "governed traffic: $allowed call(s) allowed, then the Breaker refused $refused with HTTP 402 (budget $cap USD, run $run)"
+  elif [ "$allowed" -gt 0 ]; then
+    warn "governed traffic: $allowed call(s) went through and none was refused; the record plane will have less to seal than usual."
+  else
+    warn "governed traffic: the gateway answered nothing; skipping. The record plane will seal whatever the other planes wrote."
+  fi
+}
+
 # seed_demo_fleet: like seed_demo above, but a richer, still clearly-labeled
 # dataset for a prospect who wants to see a live, moving console without
 # wiring up their own agents. Same mechanism as seed_demo (POST to cloud's
@@ -903,6 +974,11 @@ if [ "$NO_DEMO" -eq 0 ]; then
   else
     seed_demo
   fi
+  # After the seed, because the seed fills the dashboard and this fills the
+  # event bus, and the record plane below reads the bus. Both are part of the
+  # demonstration, so both are skipped by --no-demo together: a run that asked
+  # for no demo data must not get demo traffic through the back door.
+  demo_traffic
 fi
 
 # --------------------------------------------------------------------------

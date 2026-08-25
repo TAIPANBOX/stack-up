@@ -79,7 +79,9 @@ Skip this whole section with `--no-tools`.
 ## Requirements
 
 - **git** and **curl**.
-- **Rust** (stable, via [rustup](https://rustup.rs)) - tokenfuse is built from source.
+- **Rust** (stable, via [rustup](https://rustup.rs)) - tokenfuse is built from
+  source, and so is trailryx (the record plane, below). If that build fails for
+  any reason, stack-up skips just that plane and everything else still comes up.
 - **Node** and **npm** - only for the dashboard (a one-time static build).
 - **python3** - to serve the dashboard, and to install engram and verdryx into
   their own virtualenvs (3.11+ for those two).
@@ -153,6 +155,59 @@ enforcement instead, send Anthropic Messages API traffic to `:4100` with an
 out (see the [tokenfuse README](https://github.com/TAIPANBOX/tokenfuse) for
 wiring a real upstream).
 
+## The record plane
+
+Every plane above produces events. [trailryx](https://github.com/TAIPANBOX/trailryx)
+is the one that reads them and seals them: a chained, offline-verifiable ledger
+of what the stack did, built so that nobody can quietly edit a record or drop
+one from the middle without every seal after it stopping to match.
+
+After the demo has run, `./up.sh` imports every `*.ndjson` file under
+`~/.stack-up/events` (tokenfuse's, wardryx's, scopyx's - the same directory
+heraldyx already reads as a whole) into `~/.stack-up/records`, mapping what it
+can and counting by name what it cannot: an event type this reading of the
+estate's shared envelope does not map yet is `unknown_type`, and it is counted
+rather than dropped silently, the same way an unmapped destination is refused
+rather than let through elsewhere in this launcher. `routines.sh`'s
+`trailryx-seal` (see below) runs the identical command on a timer, so the
+record stays current after the demo: it remembers where it stopped in each
+file, so a run that finds nothing new costs one file read, not a duplicate.
+
+**What it does not do here, because this is a sandbox.** No signing key is
+configured, so a pack has no signature over its root: the offline verifier says
+so by name (`root-signature: no signature, so this pack proves it is
+self-consistent and not who published it`) rather than silently passing. No
+witness and no timestamp authority are wired either, so nothing independent
+attests to when the root existed. Neither weakness is hidden: `trailryx-verify`
+prints both, plainly, every time. Payload text is never stored at all here -
+trailryx-node has no key custodian, so it declines payload parts and counts
+them rather than sealing them under a key it generated and forgets on exit.
+None of this is a claim of compliance; it is a demonstration of what a real
+deployment would need to add (a signing key, an independent witness) to close
+those two gaps, which is exactly what the verifier's own output tells you.
+
+See it in one command, once the stack has come up:
+
+```sh
+~/.taipan/bin/trailryx-node read --data ~/.stack-up/records --all
+```
+
+or seal a portable, offline-checkable snapshot of it:
+
+```sh
+~/.taipan/bin/trailryx-node read --data ~/.stack-up/records --all --pack ~/.stack-up/records/trailryx.pack
+~/.taipan/bin/trailryx-verify ~/.stack-up/records/trailryx.pack
+```
+
+`trailryx-verify` reads no network, no configuration and no state: it is the
+one binary here meant to be run by somebody who does not trust the rest of the
+stack, and it exits non-zero the moment anything in the pack fails to verify.
+
+`--only money` skips it, the same way it skips wardryx, idryx, heraldyx and
+scopyx. If the sibling `trailryx` checkout or a working Rust toolchain is
+missing, or the build fails, `./up.sh` says so and skips just this plane - the
+rest of the stack is unaffected, the same way a missing `go` skips scopyx.
+
 ## Options
 
 ```
@@ -181,7 +236,7 @@ Run it in the foreground and Ctrl-C stops everything. If you background it
 
 The stack produces governance signal on its own, but nobody looks at it
 unless something runs it on a schedule. `routines.sh` is that schedule: it
-installs OS-native timers (systemd on Linux, launchd on macOS) for five
+installs OS-native timers (systemd on Linux, launchd on macOS) for six
 routines, and it is also the thing those timers invoke.
 
 | Routine | Runs (local time) | What it does |
@@ -191,11 +246,12 @@ routines, and it is also the thing those timers invoke.
 | `verdryx-drift` | daily 06:27 | `verdryx drift` against a baseline you set -> a quality-regression check. |
 | `idryx-detect` | daily 06:37 | `idryx detect` over the tokenfuse event stream -> an identity/access anomaly sweep. |
 | `mockryx-drill` | weekly, Monday 06:47 | a live fire drill against your own gateway. **Opt-in only** - see the warning below. |
+| `trailryx-seal` | daily 06:57 | `trailryx-node events` over every file in the shared event directory -> a sealed, offline-verifiable record of what the other routines, and the rest of the stack, did. Runs last so it can seal the same day's `verdryx-drift` finding too. |
 
 ```sh
 ./routines.sh list                  # one line per routine: installed? last run?
 ./routines.sh run <name>            # run one now (this is what the scheduler calls)
-./routines.sh install               # install timers for the four safe routines
+./routines.sh install               # install timers for the five safe routines
 ./routines.sh install --with-drill  # also install the weekly drill (see the warning below)
 ./routines.sh uninstall             # remove exactly and only what install created
 ./routines.sh status                # last record per routine, plus the scheduler's own view
@@ -294,6 +350,8 @@ Everything that is only stack-up's business stays under `~/.stack-up/`
   markers/     staleness stamps + a checksum of each file stack-up installed
   repos/       repos stack-up cloned itself (absent if you use sibling checkouts)
   events/      the NDJSON event stream the services write and read
+  records/     trailryx's sealed ledger, built from events/ (absent if that
+               plane was skipped)
   logs/        one log file per service
   pids/        recorded PIDs, used by down.sh
 ```

@@ -70,6 +70,11 @@
 #                       loopback and fetches nothing unless asked; the one call
 #                       ./up.sh makes through it is refused before any packet
 #                       leaves, so it reaches the network never.
+#   --with-delegation   also start vouchryx, the delegation-token service, and
+#                       open the gateway's delegation door against it. Opt-in
+#                       because it mints keys and adds a plane; without it the
+#                       door stays shut and a chain reaching the PDP is one the
+#                       CALLER asserted rather than one anybody proved.
 #   --force-install     replace binaries another tool installed (default: leave
 #                       them alone and use them as they are)
 #   --workspace <dir>   look here for sibling checkouts before cloning
@@ -149,6 +154,7 @@ DASH_PORT=3000
 WARDRYX_PORT=8090
 IDRYX_PORT=8081
 SCOPYX_PORT=4300
+VOUCHRYX_PORT=4310
 
 # --------------------------------------------------------------------------
 # Options
@@ -161,6 +167,7 @@ DEMO_FLEET=0
 NO_TOOLS=0
 NO_NOTIFY=0
 NO_EGRESS=0
+WITH_DELEGATION=0
 FORCE_INSTALL=0
 WORKSPACE="${STACK_UP_WORKSPACE:-$(dirname "$SCRIPT_DIR")}"
 
@@ -186,6 +193,7 @@ while [ $# -gt 0 ]; do
     --no-tools) NO_TOOLS=1 ;;
     --no-notify) NO_NOTIFY=1 ;;
     --no-egress) NO_EGRESS=1 ;;
+    --with-delegation) WITH_DELEGATION=1 ;;
     --force-install) FORCE_INSTALL=1 ;;
     --workspace) shift; WORKSPACE="${1:-}"; [ -n "$WORKSPACE" ] || { echo "stack-up: --workspace needs a directory" >&2; exit 2; } ;;
     -h|--help) usage; exit 0 ;;
@@ -931,8 +939,113 @@ fi
 # demo, and the gateway warns at every start that its numbers are fictional. A
 # deployment that meters real traffic sets TOKENFUSE_UPSTREAM instead, which is
 # what stack-single and stack-k8s do.
+# --------------------------------------------------------------------------
+# Vouchryx (optional, --with-delegation): the delegation-token service.
+#
+# WHY THIS IS OPT-IN AND STARTS HERE. The gateway reads its delegation
+# configuration once, at startup, and a JWKS it cannot read is a hard exit
+# rather than a warning: a door reporting itself open while refusing every
+# token is the failure this whole plane exists to avoid. So vouchryx has to be
+# up, and its public keys on disk, BEFORE the gateway starts. That ordering is
+# the only reason this block sits above the gateway rather than beside the
+# other optional planes.
+#
+# WHAT IT COSTS TO LEAVE OFF, said plainly, because "optional" reads as
+# "cosmetic". With the door shut, `chainproof::resolve` returns a CLAIMED
+# chain: `x-fuse-on-behalf-of` is whatever the caller typed. wardryx has rules
+# that read that chain, so a depth cap then caps a number the caller chose and
+# `deny_if_chain_unproven` denies on the strength of an assertion. Off is the
+# safe default only because nothing pretends otherwise.
+DELEG_ENV=()
+if [ "$WITH_DELEGATION" -eq 1 ]; then
+  VOUCHRYX_REPO="$(locate_repo vouchryx)" || { warn "could not fetch vouchryx; skipping delegation."; WITH_DELEGATION=0; }
+fi
+if [ "$WITH_DELEGATION" -eq 1 ]; then
+  migrate_legacy vouchryx
+  VOUCHRYX_BIN="$BIN_DIR/vouchryx"
+  if foreign_binary vouchryx; then
+    log "vouchryx: already installed by another tool; using $VOUCHRYX_BIN"
+  elif installed_by_us vouchryx && ! stale_paths "$MARKERS_DIR/.marker-vouchryx" "$VOUCHRYX_REPO/cmd" "$VOUCHRYX_REPO/internal" "$VOUCHRYX_REPO/go.mod"; then
+    log "vouchryx: up to date, skipping build"
+  else
+    log "vouchryx: building (Go)"
+    if ! ( cd "$VOUCHRYX_REPO" && go build -o "$BUILD_DIR/vouchryx" ./cmd/vouchryx && go build -o "$BUILD_DIR/vouchryx-demo" ./cmd/vouchryx-demo ) \
+       || ! install_binary vouchryx "$BUILD_DIR/vouchryx" \
+       || ! install_binary vouchryx-demo "$BUILD_DIR/vouchryx-demo"; then
+      warn "vouchryx build failed; skipping delegation."; WITH_DELEGATION=0
+    else
+      : > "$MARKERS_DIR/.marker-vouchryx"
+    fi
+  fi
+fi
+if [ "$WITH_DELEGATION" -eq 1 ]; then
+  # Three keys, minted by vouchryx's own reference client rather than by
+  # openssl here: the service refuses a JWKS whose key has no `kid`, and the
+  # client is what knows that. Minting them here in shell would be this
+  # launcher holding an opinion about another repository's key format.
+  #
+  # `idp` stands in for the customer's identity provider, which a sandbox does
+  # not have. That is the honest shape of the compromise: nothing here is a way
+  # to run delegation in production, where the subject and actor tokens come
+  # from an IdP somebody else operates.
+  DELEG_DIR="$STACK_UP_HOME/delegation"
+  mkdir -p "$DELEG_DIR"
+  if [ ! -f "$DELEG_DIR/signing.pem" ]; then
+    log "vouchryx: minting a demo issuer, a signing key and a caller key"
+    # The demo issuer gets a readable kid because it is named in
+    # VOUCHRYX_TRUSTED_ISSUERS below and an operator has to match the two by
+    # eye. The other two default to their own thumbprint, which is what a
+    # rotation wants: derived from the key, so two never collide.
+    if ! "$BIN_DIR/vouchryx-demo" keygen -out "$DELEG_DIR/idp" -kid stack-up-idp > /dev/null 2>&1; then
+      warn "could not mint the demo issuer key; skipping delegation."; WITH_DELEGATION=0
+    fi
+    for k in signing holder; do
+      [ "$WITH_DELEGATION" -eq 1 ] || break
+      if ! "$BIN_DIR/vouchryx-demo" keygen -out "$DELEG_DIR/$k" > /dev/null 2>&1; then
+        warn "could not mint the $k key; skipping delegation."; WITH_DELEGATION=0; break
+      fi
+    done
+  fi
+fi
+if [ "$WITH_DELEGATION" -eq 1 ]; then
+  log "starting vouchryx on :$VOUCHRYX_PORT (demo issuer, 5 min tokens)"
+  VOUCHRYX_ADDR="127.0.0.1:$VOUCHRYX_PORT" \
+  VOUCHRYX_ISSUER="http://127.0.0.1:$VOUCHRYX_PORT" \
+  VOUCHRYX_SIGNING_KEY="$DELEG_DIR/signing.pem" \
+  VOUCHRYX_TRUSTED_ISSUERS="https://idp.stack-up.local|http://127.0.0.1:$VOUCHRYX_PORT|$DELEG_DIR/idp.jwks.json" \
+  VOUCHRYX_EVENTS_PATH="$EVENTS_DIR/vouchryx.ndjson" \
+    "$VOUCHRYX_BIN" > "$LOGS_DIR/vouchryx.log" 2>&1 &
+  register vouchryx "$!" TERM
+  if wait_health vouchryx "$VOUCHRYX_PORT" "$!" "/.well-known/jwks.json"; then
+    # Its public keys, fetched rather than derived: what the gateway must trust
+    # is what this service actually publishes, and reading it back is the only
+    # thing that proves the two agree.
+    if curl -fsS -o "$DELEG_DIR/vouchryx.jwks.json" \
+         "http://127.0.0.1:$VOUCHRYX_PORT/.well-known/jwks.json" 2>/dev/null; then
+      DELEG_ENV=(
+        "TOKENFUSE_DELEGATION_ISSUER=http://127.0.0.1:$VOUCHRYX_PORT"
+        "TOKENFUSE_DELEGATION_JWKS=$DELEG_DIR/vouchryx.jwks.json"
+        "TOKENFUSE_DELEGATION_URL=http://127.0.0.1:$GATEWAY_PORT"
+        "TOKENFUSE_DELEGATION_REVOCATIONS=http://127.0.0.1:$VOUCHRYX_PORT/v1/revocations"
+        "TOKENFUSE_DELEGATION_REVOCATIONS_INTERVAL_MS=1000"
+      )
+    else
+      warn "vouchryx is up but its JWKS could not be read; the gateway's door stays shut."
+      WITH_DELEGATION=0
+    fi
+  else
+    warn "vouchryx did not come up; the gateway's door stays shut."
+    WITH_DELEGATION=0
+  fi
+fi
+
 log "starting gateway on :$GATEWAY_PORT (enforce, stub upstream, reporting to the cloud)"
 if [ -n "$WARDRYX_URL" ]; then
+  # ${a[@]+"${a[@]}"} and not "${a[@]}": under `set -u` bash 3.2, which is what
+  # /usr/bin/env bash resolves to on macOS, an empty array expansion is an
+  # unbound-variable error. Written the short way this line breaks every run
+  # that does NOT ask for delegation, which is all of them by default.
+  env ${DELEG_ENV[@]+"${DELEG_ENV[@]}"} \
   TOKENFUSE_ADDR="127.0.0.1:$GATEWAY_PORT" \
   TOKENFUSE_ALLOW_STUB="1" \
   TOKENFUSE_MODE="enforce" \
@@ -946,6 +1059,11 @@ if [ -n "$WARDRYX_URL" ]; then
   TOKENFUSE_WARDRYX_TIMEOUT_MS="2000" \
     "$GATEWAY_BIN" > "$LOGS_DIR/gateway.log" 2>&1 &
 else
+  # ${a[@]+"${a[@]}"} and not "${a[@]}": under `set -u` bash 3.2, which is what
+  # /usr/bin/env bash resolves to on macOS, an empty array expansion is an
+  # unbound-variable error. Written the short way this line breaks every run
+  # that does NOT ask for delegation, which is all of them by default.
+  env ${DELEG_ENV[@]+"${DELEG_ENV[@]}"} \
   TOKENFUSE_ADDR="127.0.0.1:$GATEWAY_PORT" \
   TOKENFUSE_ALLOW_STUB="1" \
   TOKENFUSE_MODE="enforce" \

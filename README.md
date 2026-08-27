@@ -38,10 +38,57 @@ Everything binds to `127.0.0.1` only.
 | idryx | 8081 | Identity/access graph, built from the event stream. Its own default `:8080` collides with cloud, so stack-up runs it on `:8081`. |
 | heraldyx | none | The notifier. Reads the same event stream and decides which events are worth writing to a human about. Here it is pinned to file mode: it writes what it WOULD mail to `~/.stack-up/mail.txt` and opens no socket. `--no-notify` skips it. |
 | scopyx | 4300 | Governed web egress. Agents fetch **through** it, and wardryx decides every destination before anything leaves. `./up.sh` makes one call through it, to the cloud metadata address, which is refused on its address before a packet leaves the machine: read the refusal in `~/.stack-up/events/scopyx.ndjson` and the alert it raised in `~/.stack-up/mail.txt`. `--no-egress` skips it. |
+| vouchryx | 4310 | The delegation-token service, **only with `--with-delegation`**. Issues RFC 8693 tokens bound to a key the caller proved it holds, and the revocation list the gateway polls. Without the flag the gateway's delegation door stays shut, and a chain reaching the policy plane is one the CALLER asserted. |
 
 The money plane (gateway + cloud + dashboard) is mandatory; the rest degrade
 gracefully. If a toolchain or a port is missing, stack-up says so and brings up
 what it can, rather than failing the whole run.
+
+
+### Delegation, and what leaving it off actually means
+
+`./up.sh --with-delegation` also starts vouchryx, mints a demo issuer into
+`~/.stack-up/delegation`, and opens the gateway's delegation door against it.
+The gateway then says so at startup:
+
+```
+delegation door: ON, chains reaching the PDP are verified here
+revocation list: polling url=http://127.0.0.1:4310/v1/revocations
+                 interval_ms=1000 fail_mode=Closed
+```
+
+The whole loop, measured on 2026-08-27 against this launcher, using the client
+vouchryx ships:
+
+```sh
+D=~/.stack-up/delegation; B=~/.taipan/bin
+TOK=$("$B/vouchryx-demo" exchange -url http://127.0.0.1:4310 \
+  -idp-key "$D/idp.pem" -kid stack-up-idp \
+  -iss https://idp.stack-up.local -aud http://127.0.0.1:4310 \
+  -subject user://acme/ada -actor agent://acme/triage -holder-key "$D/holder.pem")
+```
+
+| step | result |
+|---|---|
+| a call carrying that token and a fresh proof | HTTP 200 |
+| `POST :4310/v1/revoke` for `user://acme/ada` | `{"revoked":true}` |
+| the same token, after one poll | HTTP 401, `reason=BadToken` in the gateway log |
+| **the same revoked token, on a launcher started WITHOUT the flag** | **HTTP 200** |
+
+That last row is what "optional" costs. With the door shut the token is never
+examined, so a credential somebody has explicitly ended is simply not looked
+at, and `x-fuse-on-behalf-of` is whatever the caller typed.
+
+**The demo issuer is a sandbox, not a way to run this.** A real deployment's
+subject and actor tokens come from an identity provider somebody else operates;
+this mints one because a laptop does not have one, and its private key sits in
+`~/.stack-up/delegation` by design.
+
+Two things the loop needs that are easy to miss. The gateway wants
+`x-fuse-agent-id` even when a proven chain already names the agent, because the
+chain fills the RECORD's subject and not the identity that policy and billing
+run on. And a DPoP proof is bound to one method and one URL, so a fresh one is
+needed per request.
 
 ## What it installs but does not start
 

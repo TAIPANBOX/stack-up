@@ -255,6 +255,38 @@ scopyx. If the sibling `trailryx` checkout or a working Rust toolchain is
 missing, or the build fails, `./up.sh` says so and skips just this plane - the
 rest of the stack is unaffected, the same way a missing `go` skips scopyx.
 
+
+### Which trust domain it seals
+
+The record plane accepts an event only if its agent id begins
+`agent://<domain>/`, matched against **one** value. Give it a domain nothing on
+your box carries and every line is refused, counted, and the run exits 0.
+
+So the domain comes from the deployment. `./up.sh` takes it from
+`STACK_UP_TRUST_DOMAIN` (default `demo.local`) and writes it to
+`~/.stack-up/trust-domain`, which is what the scheduled seal reads. A file
+rather than an exported variable, because neither the systemd unit nor the
+launchd plist this repo generates passes environment through, so an export
+reaches a run by hand and never reaches the timer.
+
+```sh
+STACK_UP_TRUST_DOMAIN=acme.example ./up.sh
+```
+
+**The seal refuses before it imports, not after.** The plane commits its
+reading position even for a run that wrote nothing, so one pass under the wrong
+domain marks every line read and no later correction gets them back: the next
+pass answers `nothing new. The cursor is at byte N of N (40 line(s), 0
+record(s) so far)`. Measured on 2026-08-27, which is also the day this launcher
+was found to have sealed nothing but its own synthetic demo fleet while four
+real planes wrote to the same directory.
+
+Partial refusal is normal and is not an error. This launcher mints under
+several domains on purpose: scopyx identifies its demo agent as
+`agent://local.invalid/demo-agent`, because RFC 2606 reserves `.invalid` and a
+sandbox identity must not be mistakable for a real one in a trail somebody
+keeps. Only a total refusal stops the run.
+
 ## Options
 
 ```

@@ -146,7 +146,12 @@ RECORDS_DIR="$STACK_UP_HOME/records"
 # line whose agent is outside the domain it is given, silently and by name
 # (foreign_trust_domain), so a copy of this string that drifted from the real
 # one would make it import nothing and say nothing was wrong.
-DEMO_TRUST_DOMAIN="demo.local"
+#
+# Configurable since 2026-08-27, and written to disk rather than only held in
+# a variable: the record plane's seal runs from a timer that inherits no
+# environment, so a domain the launcher knows and the timer does not is the
+# same silent nothing this comment already warns about, one layer down.
+DEMO_TRUST_DOMAIN="${STACK_UP_TRUST_DOMAIN:-demo.local}"
 
 GATEWAY_PORT=4100
 CLOUD_PORT=8080
@@ -838,6 +843,13 @@ if [ "$WANT_IDENTITY" -eq 1 ] && port_busy "$IDRYX_PORT"; then
 fi
 
 mkdir -p "$EVENTS_DIR" "$LOGS_DIR" "$PIDS_DIR" "$REPOS_DIR" "$MARKERS_DIR" "$BUILD_DIR"
+
+# Hand the trust domain to the scheduled seal. routines.sh reads this file at
+# load; the alternative, an exported variable, reaches a run by hand and never
+# reaches a timer, because neither generated unit passes environment through.
+# One line, no shell in it, so nothing here becomes a code channel the way the
+# routines config already is.
+printf '%s\n' "$DEMO_TRUST_DOMAIN" > "$STACK_UP_HOME/trust-domain"
 # The shared home may not exist yet, and if we are the ones creating it we
 # create it closed: it accumulates an event stream and, under `taipan`, dev
 # bearer keys. An existing one is never re-chmod'ed - its permissions are its

@@ -106,7 +106,23 @@ EVENTS_DIR="$STACK_UP_HOME/events"
 # keep in sync with up.sh
 EVENTS_FILE="$EVENTS_DIR/tokenfuse.ndjson"
 RECORDS_DIR="$STACK_UP_HOME/records"     # keep in sync with up.sh
-DEMO_TRUST_DOMAIN="demo.local"           # keep in sync with up.sh
+# The trust domain the record plane is told to accept. `up.sh` writes the one
+# it actually minted identities under into $STACK_UP_HOME/trust-domain, so a
+# scheduled run seals under the same name the launcher used rather than under a
+# second literal held in step by a comment. The fallback is the launcher's own
+# default, and `scripts/one-trust-domain.sh` holds the two equal.
+#
+# Reading a FILE rather than the environment is not a style choice: neither the
+# generated systemd unit nor the launchd plist passes any environment through,
+# so an exported variable reaches a run by hand and never reaches the timer,
+# which is the run that matters. The routines config file is sourced later and
+# can still override this, which is the operator's own channel.
+DEMO_TRUST_DOMAIN="demo.local"
+if [ -r "$STACK_UP_HOME/trust-domain" ]; then
+  read -r _td < "$STACK_UP_HOME/trust-domain" || _td=""
+  [ -n "$_td" ] && DEMO_TRUST_DOMAIN="$_td"
+  unset _td
+fi
 
 ROUTINES_DIR="$STACK_UP_HOME/routines"
 HISTORY_FILE="$ROUTINES_DIR/history.ndjson"
@@ -562,10 +578,59 @@ routine_trailryx_seal() {
   # Best-effort across files, exactly like up.sh's own one-shot import: one
   # unreadable file (permissions, a disk full mid-write) is that file's
   # problem, not a reason to leave every other file's new events unsealed.
+  # REFUSE BEFORE CONSUMING, not after.
+  #
+  # The record plane's cursor commits the position it reached even when the run
+  # wrote zero records, so one pass under a domain that matches nothing marks
+  # every line read and NO correction recovers them: the next pass, with the
+  # right domain, answers "nothing new. The cursor is at byte N of N (40
+  # line(s), 0 record(s) so far)". Measured 2026-08-27 against copies of this
+  # launcher's own bus. The only way back is deleting a cursor file by hand,
+  # and nothing tells an operator that.
+  #
+  # So the check that matters runs BEFORE the first import. It reads the agent
+  # ids already present against the domain we are about to pass, over files
+  # this routine was going to read anyway.
+  #
+  # It refuses only when NOTHING matches. A partial match is the designed state
+  # here: this launcher mints under several domains on purpose, and
+  # `--trust-domain` takes one value.
+  local probe seen matched
+  probe="$(python3 -c 'import json, sys
+prefix = "agent://" + sys.argv[1] + "/"
+seen = matched = 0
+for path in sys.argv[2:]:
+    try:
+        fh = open(path, encoding="utf-8")
+    except OSError:
+        continue
+    with fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                agent = json.loads(line).get("agent_id")
+            except Exception:
+                continue
+            if isinstance(agent, str) and agent:
+                seen += 1
+                if agent.startswith(prefix):
+                    matched += 1
+print(seen, matched)
+' "$DEMO_TRUST_DOMAIN" "${files[@]}" 2>/dev/null)"
+  seen="${probe%% *}"; matched="${probe##* }"
+  if [ -n "$probe" ] && [ "${seen:-0}" -gt 0 ] && [ "${matched:-0}" -eq 0 ]; then
+    RESULT_STATUS=error
+    RESULT_EXIT_CODE=0
+    RESULT_REASON="refusing before importing: none of the $seen agent id(s) on the bus is under \`$DEMO_TRUST_DOMAIN\`, so every line would be refused AND its position committed, putting those events permanently outside the record. Set the domain this box mints under in $STACK_UP_HOME/trust-domain, or in $CONFIG_FILE as DEMO_TRUST_DOMAIN."
+    return
+  fi
+
   local log="$LOGS_DIR/trailryx-seal.log"
   : > "$log"
-  local written=0 lost=0 sealed=0 failed=0
-  local f out rc w l n
+  local written=0 lost=0 sealed=0 failed=0 foreign=0
+  local f out rc w l n fd
   for f in "${files[@]}"; do
     out="$("$node" events --file "$f" --data "$RECORDS_DIR" --trust-domain "$DEMO_TRUST_DOMAIN" --seal-records 500 2>&1)"
     rc=$?
@@ -577,9 +642,16 @@ routine_trailryx_seal() {
     w="$(printf '%s\n' "$out" | sed -n 's/.*, \([0-9][0-9]*\) record(s) written,.*/\1/p' | head -n1)"
     l="$(printf '%s\n' "$out" | awk '/^  refused:/ { s=0; for (i=3;i<=NF;i+=2) s+=$i; print s; exit }')"
     n="$(printf '%s\n' "$out" | grep -c '^sealed ')"
+    # foreign_trust_domain on its own, not folded into `lost`: the other seven
+    # refusal classes are the record plane declining a type it documents as
+    # out of scope, which is correct and expected. This one is the plane being
+    # pointed at a name nothing on this box carries, which is a configuration
+    # fault wearing a normal-looking counter.
+    fd="$(printf '%s\n' "$out" | awk '/^  refused:/ { for (i=1;i<NF;i++) if ($i == "foreign_trust_domain") { print $(i+1); exit } }')"
     written=$((written + ${w:-0}))
     lost=$((lost + ${l:-0}))
     sealed=$((sealed + ${n:-0}))
+    foreign=$((foreign + ${fd:-0}))
   done
 
   if [ ! -d "$RECORDS_DIR" ]; then
@@ -594,6 +666,32 @@ routine_trailryx_seal() {
       RESULT_STATUS=ok
       RESULT_SUMMARY="0 record(s) written, nothing to pack yet"
     fi
+    return
+  fi
+
+  # NOTHING MAPPED, AND SOMETHING WAS REFUSED FOR BEING OUTSIDE THE DOMAIN.
+  #
+  # This is the one refusal class that means the operator pointed the plane at
+  # a name nothing here carries, and until 2026-08-27 it was reported as a
+  # normal run. Measured that day on this launcher's own event directory: the
+  # seal was given `demo.local`, every line on the bus was minted under
+  # `local.invalid`, `mockryx.local` or `acme`, and it wrote 0 records across
+  # 52 lines while recording status ok and printing "0 record(s) sealed" under
+  # a banner calling it expected.
+  #
+  # It is the same fault this file already refuses to build for verdryx forty
+  # lines up: a path that can never carry anything is worse than one left
+  # unwired, because the empty journal looks exactly like a calm fleet.
+  #
+  # PARTIAL is deliberately NOT an error. This launcher mints under several
+  # domains ON PURPOSE (scopyx uses `local.invalid` because RFC 2606 reserves
+  # it, so a sandbox identity cannot be mistaken for a real one), and
+  # `--trust-domain` takes exactly one value, so some foreign lines are the
+  # designed state rather than a fault.
+  if [ "$written" -eq 0 ] && [ "$foreign" -gt 0 ]; then
+    RESULT_STATUS=error
+    RESULT_EXIT_CODE=0
+    RESULT_REASON="sealed nothing: all $foreign mapped-eligible line(s) name an agent outside \`$DEMO_TRUST_DOMAIN\`, so the record plane refused every one. Set the domain this box actually mints under in $STACK_UP_HOME/trust-domain, or in $CONFIG_FILE as DEMO_TRUST_DOMAIN."
     return
   fi
 
@@ -620,7 +718,7 @@ routine_trailryx_seal() {
   RESULT_ARTIFACT="out/$(basename "$pack")"
   if [ "$verify_rc" -eq 0 ] && [ "$failed" -eq 0 ]; then
     RESULT_STATUS=ok
-    RESULT_SUMMARY="$written record(s) written, $sealed segment(s) sealed, $lost line(s) produced none; pack verified"
+    RESULT_SUMMARY="$written record(s) written, $sealed segment(s) sealed, $lost line(s) produced none ($foreign outside \`$DEMO_TRUST_DOMAIN\`); pack verified"
   elif [ "$verify_rc" -eq 0 ]; then
     RESULT_STATUS=error
     RESULT_REASON="$failed of ${#files[@]} file(s) could not be read; see $log"

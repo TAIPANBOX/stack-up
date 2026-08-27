@@ -24,6 +24,9 @@ jobs:
       - name: every port stays on loopback
         run: ./scripts/loopback-only.sh
 
+      - name: one trust domain, and the seal refuses before it consumes
+        run: ./scripts/one-trust-domain.sh
+
       # Last, because it mutates tracked files and restores them. It needs a
       # clean tree and says so plainly, so it also reports any earlier step
       # that starts writing into the checkout.

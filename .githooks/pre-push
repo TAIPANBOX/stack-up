@@ -33,6 +33,7 @@ echo "pre-push gate"
 step "shellcheck" "shellcheck up.sh down.sh routines.sh"
 step "shell syntax" "bash -n up.sh && bash -n down.sh && bash -n routines.sh"
 step "loopback only" "./scripts/loopback-only.sh"
+step "one trust domain" "./scripts/one-trust-domain.sh"
 
 echo
 if [ "$fail" -ne 0 ]; then

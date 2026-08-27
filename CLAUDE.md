@@ -124,6 +124,45 @@ building here and the thing that most often gets skipped.
 
 ## Standing rule
 
+7. **The trust domain the record plane is given comes from the deployment, and
+   the seal refuses BEFORE it consumes.**
+
+   The plane accepts an event only if its agent id begins `agent://<domain>/`,
+   matched as one byte prefix against exactly one value. A domain matching
+   nothing is not an error there: every line is counted under
+   `foreign_trust_domain` and the process exits 0.
+
+   Measured 2026-08-27 on this launcher's own bus: the seal was given
+   `demo.local` while every line was minted under `local.invalid`,
+   `mockryx.local` or `acme`. It wrote 0 records across 52 lines, recorded
+   status `ok`, and printed "0 record(s) sealed" under a banner calling it
+   expected. All 35 records in the seven segments that did exist were the
+   synthetic demo fleet. Not one event any real plane had ever emitted was in
+   the record.
+
+   **The ordering is the invariant, not the message.** The plane commits its
+   cursor for a run that wrote zero records, so a check after the import loop
+   reports a loss it could have prevented: the next pass, with the domain
+   corrected, answers "nothing new. The cursor is at byte N of N (40 line(s),
+   0 record(s) so far)", and the only way back is deleting a cursor file by
+   hand, which nothing tells an operator to do.
+
+   **Partial refusal is the designed state and must not be an error.** This
+   launcher mints under several domains on purpose: scopyx uses `local.invalid`
+   because RFC 2606 reserves `.invalid`, so a sandbox identity cannot be
+   mistaken for a real one in somebody's trail. `--trust-domain` takes one
+   value, so only a total refusal is a fault.
+
+   The default is named once and the two launchers are held equal, because
+   before this they were two literals joined by the comment `# keep in sync
+   with up.sh` and nothing checked the pair. `up.sh` writes the domain it
+   actually used to `$STACK_UP_HOME/trust-domain`, because neither generated
+   unit passes environment through, so an exported variable reaches a run by
+   hand and never reaches the timer.
+   *(gate: `scripts/one-trust-domain.sh`, with four cases in
+   `gates-have-teeth.sh`: the two launchers disagreeing, the backstop removed,
+   the check moved after the import loop, and both subjects renamed away)*
+
 An approved architecture decision is **not finished** until it is two things: a
 numbered invariant in this file, and a gate in a script if it can be checked
 structurally. Until then it is a document, and documents do not stop code.

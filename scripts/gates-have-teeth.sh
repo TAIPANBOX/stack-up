@@ -176,6 +176,41 @@ run_case "loopback-only: a launcher URL leaves loopback" fail \
 	"$(py 'edit("up.sh", "WARDRYX_URL=\"http://127.0.0.1:$WARDRYX_PORT\"", "WARDRYX_URL=\"http://0.0.0.0:$WARDRYX_PORT\"")')" \
 	"is not loopback"
 
+# The two launchers drift apart on the trust domain. This is the edit an
+# operator makes when the seal imports nothing: change the one they found,
+# leave the other, and the same records directory is then sealed under one
+# name by ./up.sh and another by the timer.
+run_case "one-trust-domain: the two launchers disagree" fail \
+	'./scripts/one-trust-domain.sh' \
+	"$(py 'edit("routines.sh", "DEMO_TRUST_DOMAIN=\"demo.local\"", "DEMO_TRUST_DOMAIN=\"acme.example\"")')" \
+	"different trust domains"
+
+# THE ONE THAT WAS TRUE UNTIL 2026-08-27. Take the backstop away and the
+# routine reports ok on a run that sealed none of a full bus, which is how
+# seven segments came to hold nothing but the synthetic demo fleet while four
+# real planes wrote to the same directory for weeks.
+run_case "one-trust-domain: a seal that maps nothing reports ok again" fail \
+	'./scripts/one-trust-domain.sh' \
+	"$(py 'edit("routines.sh", "  if [ \"$written\" -eq 0 ] && [ \"$foreign\" -gt 0 ]; then", "  if false; then")')" \
+	"does not refuse a seal that wrote nothing"
+
+# THE ONE THAT MATTERS MORE. Move the pre-flight check after the import loop
+# and it still reports the fault, correctly, on a run that has already
+# committed a cursor past every line. The events are gone by then.
+run_case "one-trust-domain: the domain is checked after the plane was read" fail \
+	'./scripts/one-trust-domain.sh' \
+	"$(py 'import re
+s = open("routines.sh").read()
+m = re.search(r"  local probe seen matched\n(?:.*\n)*?  fi\n\n", s)
+assert m, "pre-flight block not found"
+block = m.group(0)
+s = s.replace(block, "", 1)
+anchor = "  if [ ! -d \"$RECORDS_DIR\" ]; then"
+assert anchor in s, "post-loop anchor not found"
+s = s.replace(anchor, block + anchor, 1)
+open("routines.sh", "w").write(s)')" \
+	"runs AFTER the plane was already told to read"
+
 echo
 echo "=== and what they must NOT catch ==="
 
@@ -187,12 +222,31 @@ run_case "loopback-only: a placeholder, a reference and an address in prose" pas
 	'./scripts/loopback-only.sh' \
 	"$(py 'edit("up.sh", "WARDRYX_URL=\"\"", "WARDRYX_URL=\"\"\nSPARE_URL=\"\"\nMIRROR_URL=\"$WARDRYX_URL\"\n# see https://example.com/docs for why this is loopback only")')"
 
+# up.sh reads the domain from the environment and routines.sh from a file.
+# Both are correct and they LOOK different; a gate comparing the raw lines
+# rather than the defaults would fire on a tree that is right.
+run_case "one-trust-domain: two spellings of the same default" pass \
+	'./scripts/one-trust-domain.sh' \
+	"$(py 'edit("routines.sh", "DEMO_TRUST_DOMAIN=\"demo.local\"", "DEMO_TRUST_DOMAIN=\"demo.local\"   # read from the file below")')"
+
 echo
 echo "=== and the one this estate learned the hard way ==="
 echo "    a gate whose subject is gone must SAY so, not report OK on nothing"
 
 # THE HOLE. All three launcher files renamed: every one is skipped, and before
 # 2026-08-09 skipping every one of them was a clean run.
+# The same hole, one gate over: both subjects renamed away.
+run_case "one-trust-domain: no launcher left to compare" fail \
+	'./scripts/one-trust-domain.sh' \
+	"$(py 'import subprocess, os
+n = 0
+for f in ("up.sh", "routines.sh"):
+    if os.path.exists(f):
+        subprocess.run(["git", "mv", f, f[:-3] + ".bash"], check=True)
+        n += 1
+assert n == 2, "expected both launchers"')" \
+	"measured nothing"
+
 run_case "loopback-only: no launcher left to read" fail \
 	'./scripts/loopback-only.sh' \
 	"$(py 'import subprocess, os

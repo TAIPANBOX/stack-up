@@ -1,0 +1,87 @@
+{
+  "$comment": [
+    "What this LAUNCHER installs, and what a check may believe about it.",
+    "`checked` is proved against this repository by scripts/manifest-is-true.sh;",
+    "`declared` is a statement nobody can verify and carries its own `why`.",
+    "",
+    "THIS FILE ANSWERS THE OTHER HALF OF THE QUESTION. Sixteen repositories now",
+    "declare what they BUILD. A launcher builds nothing, so its manifest declares",
+    "what it INSTALLS, the way TAIPANBOX/taipan's does.",
+    "",
+    "AND THERE IS ALREADY A SECOND OPINION, WHICH IS THE POINT. estate-gates' C5",
+    "works out the same list by PARSING this repository from a central file: it",
+    "greps `register <name>` out of up.sh and equivalents out of the other two",
+    "launchers' quite different syntaxes. That parser is careful and it is still",
+    "somebody else's reading of our source. Now there are two independent",
+    "statements of one fact, each able to catch the other drifting, and the check",
+    "below is this side of it: the list here is compared against up.sh and",
+    "routines.sh in the repository that owns them.",
+    "",
+    "THE THREE LISTS ARE NOT ONE LIST. A supervised service, a Python tool",
+    "installed into a venv and a scheduled routine are installed three different",
+    "ways here, and flattening them would lose exactly the distinction an",
+    "operator needs. `mockryx-drill` is in `routines` and in no other list,",
+    "because this launcher schedules mockryx without supervising it.",
+    "",
+    "PROFILES ARE OPT-IN AND LISTED SEPARATELY. `--with-delegation` brings up",
+    "vouchryx and `--with-finops` brings up costcrew; both appear in `services`",
+    "because the question that list answers is what this launcher CAN bring up,",
+    "not what a default run does. `routines_by_default` is the narrower answer",
+    "for the scheduled half, and it is smaller than `routines` on purpose."
+  ],
+  "schema": "taipanbox.dev/components/v1",
+  "repo": "TAIPANBOX/stack-up",
+  "kind": "launcher",
+  "components": [
+    {
+      "name": "stack-up",
+      "class": "launcher",
+      "checked": {
+        "installs_services": [
+          "cloud",
+          "costcrew",
+          "dashboard",
+          "gateway",
+          "heraldyx",
+          "idryx",
+          "scopyx",
+          "vouchryx",
+          "wardryx"
+        ],
+        "installs_python_tools": [
+          "engram-mcp",
+          "verdryx"
+        ],
+        "schedules_routines": [
+          "focus-export",
+          "qryx-trend",
+          "verdryx-drift",
+          "idryx-detect",
+          "mockryx-drill",
+          "trailryx-seal"
+        ],
+        "routines_by_default": [
+          "focus-export",
+          "qryx-trend",
+          "verdryx-drift",
+          "idryx-detect",
+          "trailryx-seal"
+        ],
+        "profiles": [
+          "delegation",
+          "finops"
+        ]
+      },
+      "declared": {
+        "it_is_the_sandbox_and_that_changes_defaults": {
+          "value": "one machine, one operator",
+          "why": "Several values here differ from the two server deployments on purpose and are recorded in estate-gates' deployment-parity file rather than here: HERALDYX_MIN_SEVERITY is `medium` where they use `high`, there is no console and no policy database. A launcher's manifest says what it installs; whether that agrees with the others is C5's question."
+        },
+        "mockryx_is_scheduled_and_not_supervised": {
+          "value": "mockryx-drill",
+          "why": "It appears in `schedules_routines` and in no other list. A drill runs and exits, so there is no process to register, and it is opt-in everywhere, which is why it is absent from routines_by_default too."
+        }
+      }
+    }
+  ]
+}

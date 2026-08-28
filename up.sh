@@ -75,6 +75,10 @@
 #                       because it mints keys and adds a plane; without it the
 #                       door stays shut and a chain reaching the PDP is one the
 #                       CALLER asserted rather than one anybody proved.
+#   --with-finops       also start costcrew, the FinOps console, wired to this
+#                       launcher's bus and minting its agents under the same
+#                       trust domain the record plane is given, so what it
+#                       emits is sealed rather than refused.
 #   --force-install     replace binaries another tool installed (default: leave
 #                       them alone and use them as they are)
 #   --workspace <dir>   look here for sibling checkouts before cloning
@@ -160,6 +164,7 @@ WARDRYX_PORT=8090
 IDRYX_PORT=8081
 SCOPYX_PORT=4300
 VOUCHRYX_PORT=4310
+COSTCREW_PORT=8321
 
 # --------------------------------------------------------------------------
 # Options
@@ -173,6 +178,7 @@ NO_TOOLS=0
 NO_NOTIFY=0
 NO_EGRESS=0
 WITH_DELEGATION=0
+WITH_FINOPS=0
 FORCE_INSTALL=0
 WORKSPACE="${STACK_UP_WORKSPACE:-$(dirname "$SCRIPT_DIR")}"
 
@@ -199,6 +205,7 @@ while [ $# -gt 0 ]; do
     --no-notify) NO_NOTIFY=1 ;;
     --no-egress) NO_EGRESS=1 ;;
     --with-delegation) WITH_DELEGATION=1 ;;
+    --with-finops) WITH_FINOPS=1 ;;
     --force-install) FORCE_INSTALL=1 ;;
     --workspace) shift; WORKSPACE="${1:-}"; [ -n "$WORKSPACE" ] || { echo "stack-up: --workspace needs a directory" >&2; exit 2; } ;;
     -h|--help) usage; exit 0 ;;
@@ -1364,6 +1371,75 @@ if [ "$WANT_EGRESS" -eq 1 ]; then
         2>/dev/null && break
       sleep 0.5
     done ) >/dev/null 2>&1 || true
+fi
+
+
+# --------------------------------------------------------------------------
+# CostCrew (optional, --with-finops): the FinOps console.
+#
+# An estate APP rather than a plane: it is a guest producer of the bus and
+# calls nobody. The worst a bad line from it can do is be refused, and both
+# consumers refuse lines by design and count them.
+#
+# THE TWO WIRINGS THAT MATTER, and both are one flag each.
+#
+# `-stack-events` names the file, and the NAME is the integration: genaryx
+# tails a directory and keys each source's read offset off the file stem, so a
+# stream under any other name is one it never reads. Empty is the default and
+# means the whole integration is off, which is why a console started without it
+# looks healthy and puts nothing anywhere.
+#
+# `-stack-passports` and `-stack-owner` are a PAIR, and the console refuses to
+# start with one and not the other: "a passport with no owner is not a valid
+# document; set the owner". Found by running it rather than by reading, and it
+# is the console being right: idryx enriches an identity with the owner who
+# answers for it, and a passport that names nobody enriches nothing. The owner
+# here is this launcher, which is the honest answer in a sandbox, since it is
+# what actually stood the agents up.
+#
+# `-stack-host` is the agent:// authority, and giving it $DEMO_TRUST_DOMAIN is
+# the point rather than tidiness. The record plane accepts an event only if its
+# agent id begins `agent://<domain>/`, matched against exactly one value, so a
+# console minting under its own default would have every line it emits refused
+# by the seal and counted as foreign. Same variable the seal is given, one
+# source, and invariant 7 holds the pair.
+if [ "$WITH_FINOPS" -eq 1 ]; then
+  COSTCREW_REPO="$(locate_repo costcrew)" || { warn "could not fetch costcrew; skipping finops."; WITH_FINOPS=0; }
+fi
+if [ "$WITH_FINOPS" -eq 1 ]; then
+  migrate_legacy costcrew
+  COSTCREW_BIN="$BIN_DIR/costcrew"
+  if foreign_binary costcrew; then
+    log "costcrew: already installed by another tool; using $COSTCREW_BIN"
+  elif installed_by_us costcrew && ! stale_paths "$MARKERS_DIR/.marker-costcrew" "$COSTCREW_REPO/cmd" "$COSTCREW_REPO/internal" "$COSTCREW_REPO/go.mod"; then
+    log "costcrew: up to date, skipping build"
+  else
+    log "costcrew: building (Go)"
+    if ! ( cd "$COSTCREW_REPO" && go build -o "$BUILD_DIR/costcrew" ./cmd/costcrew ) \
+       || ! install_binary costcrew "$BUILD_DIR/costcrew"; then
+      warn "costcrew build failed; skipping finops."; WITH_FINOPS=0
+    else
+      : > "$MARKERS_DIR/.marker-costcrew"
+    fi
+  fi
+fi
+if [ "$WITH_FINOPS" -eq 1 ]; then
+  COSTCREW_DIR="$STACK_UP_HOME/costcrew"
+  mkdir -p "$COSTCREW_DIR"
+  log "starting costcrew on :$COSTCREW_PORT (bus: costcrew.ndjson, agents under $DEMO_TRUST_DOMAIN)"
+  "$COSTCREW_BIN" \
+    -addr "127.0.0.1:$COSTCREW_PORT" \
+    -data "$COSTCREW_DIR" \
+    -stack-events "$EVENTS_DIR/costcrew.ndjson" \
+    -stack-passports "$COSTCREW_DIR/passports" \
+    -stack-owner "stack-up" \
+    -stack-host "$DEMO_TRUST_DOMAIN" \
+    > "$LOGS_DIR/costcrew.log" 2>&1 &
+  register costcrew "$!" TERM
+  # /healthz and not the board: every other route redirects to /login, and a
+  # probe that followed that redirect would report a login page as health.
+  wait_health costcrew "$COSTCREW_PORT" "$!" "/healthz" || \
+    warn "costcrew did not come up; the rest of the stack is unaffected."
 fi
 
 # --------------------------------------------------------------------------

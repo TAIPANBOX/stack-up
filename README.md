@@ -39,6 +39,7 @@ Everything binds to `127.0.0.1` only.
 | heraldyx | none | The notifier. Reads the same event stream and decides which events are worth writing to a human about. Here it is pinned to file mode: it writes what it WOULD mail to `~/.stack-up/mail.txt` and opens no socket. `--no-notify` skips it. |
 | scopyx | 4300 | Governed web egress. Agents fetch **through** it, and wardryx decides every destination before anything leaves. `./up.sh` makes one call through it, to the cloud metadata address, which is refused on its address before a packet leaves the machine: read the refusal in `~/.stack-up/events/scopyx.ndjson` and the alert it raised in `~/.stack-up/mail.txt`. `--no-egress` skips it. |
 | vouchryx | 4310 | The delegation-token service, **only with `--with-delegation`**. Issues RFC 8693 tokens bound to a key the caller proved it holds, and the revocation list the gateway polls. Without the flag the gateway's delegation door stays shut, and a chain reaching the policy plane is one the CALLER asserted. |
+| costcrew | 8321 | The FinOps console, **only with `--with-finops`**. Cloud and AI spend, an agent crew that triages it, and a person who reviews what they wrote. A guest producer: it writes the shared bus and calls nobody, and it enforces nothing. |
 
 The money plane (gateway + cloud + dashboard) is mandatory; the rest degrade
 gracefully. If a toolchain or a port is missing, stack-up says so and brings up
@@ -89,6 +90,33 @@ Two things the loop needs that are easy to miss. The gateway wants
 chain fills the RECORD's subject and not the identity that policy and billing
 run on. And a DPoP proof is bound to one method and one URL, so a fresh one is
 needed per request.
+
+
+### FinOps, and the one wiring that is easy to get wrong
+
+`./up.sh --with-finops` also starts costcrew and points it at this launcher's
+bus. Two flags carry the whole integration and both are easy to get subtly
+wrong, so the launcher sets them rather than leaving them to a reader:
+
+**The file name is the integration.** genaryx tails a directory and keys each
+source's read offset off the file stem, so the stream has to be called
+`costcrew.ndjson` and nothing else. Empty is the console's own default, which
+means a console started by hand looks perfectly healthy and puts nothing
+anywhere.
+
+**The trust domain has to be the one the record plane is given.** The seal
+accepts an event only if its agent id begins `agent://<domain>/`, matched
+against exactly one value. A console minting under its own default
+(`costcrew.local`) would have every line it emits refused by the seal and
+counted as foreign, which reads as a calm night rather than as a
+misconfiguration. So it is given `$STACK_UP_TRUST_DOMAIN`, the same value the
+seal gets, from one place.
+
+The console enforces nothing. It has no gateway, no interceptor and no refusal
+path, and every `budget_threshold` it emits carries `enforced: false`, stamped
+by the translation rather than by the caller. `tools/enforce` in that repository
+is what pushes a budget to TokenFuse, it is a separate binary, and this launcher
+does not start it.
 
 ## What it installs but does not start
 

@@ -171,6 +171,34 @@ echo "=== faults each gate must catch ==="
 # The whole invariant: a bind or a URL in the launcher points at loopback and
 # nowhere else. This is the edit somebody makes to reach the dashboard from
 # another machine, and it works, which is why nothing else would notice.
+# invariant: components.json says what this launcher actually installs.
+#
+# Two cases and they check different halves. The first is ordinary drift: a
+# plane brought up and not declared. The second is the one this estate keeps
+# learning: a reader whose subject moved reports agreement about nothing, so
+# `register` disappearing from up.sh must say "measured NOTHING" rather than
+# comparing an empty list against an empty list and passing.
+run_case "manifest-is-true: a plane is brought up and not declared" fail \
+	'./scripts/manifest-is-true.sh' \
+	"$(py 'import json
+p = "components.json"
+d = json.load(open(p))
+c = d["components"][0]["checked"]
+before = len(c["installs_services"])
+c["installs_services"] = [s for s in c["installs_services"] if s != "scopyx"]
+assert len(c["installs_services"]) == before - 1, "scopyx was not in the declared list"
+json.dump(d, open(p, "w"), indent=2)')" \
+	"and components.json does not say so"
+
+run_case "manifest-is-true: up.sh stops registering anything" fail \
+	'./scripts/manifest-is-true.sh' \
+	"$(py 'import re
+s = open("up.sh").read()
+out, n = re.subn(r"(?m)^(\s*)register\s", r"\1supervise ", s)
+assert n > 0, "up.sh has no register call to remove"
+open("up.sh", "w").write(out)')" \
+	"measured NOTHING"
+
 run_case "loopback-only: a launcher URL leaves loopback" fail \
 	'./scripts/loopback-only.sh' \
 	"$(py 'edit("up.sh", "WARDRYX_URL=\"http://127.0.0.1:$WARDRYX_PORT\"", "WARDRYX_URL=\"http://0.0.0.0:$WARDRYX_PORT\"")')" \

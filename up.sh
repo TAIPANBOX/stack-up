@@ -1176,6 +1176,7 @@ if [ "$WANT_POLICY" -eq 1 ]; then
   log "starting wardryx on :$WARDRYX_PORT (demo policy)"
   WARDRYX_KEYS="" \
   WARDRYX_APPROVAL_SECRET="$WARDRYX_APPROVAL_SECRET" \
+  WARDRYX_POLICY_ARCHIVE="$EVENTS_DIR/wardryx-policy-archive" \
     "$WARDRYX_BIN" serve -addr "127.0.0.1:$WARDRYX_PORT" -events "$EVENTS_DIR/wardryx.ndjson" -policy "$POLICY_FILE" \
     > "$LOGS_DIR/wardryx.log" 2>&1 &
   register wardryx "$!" TERM

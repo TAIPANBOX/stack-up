@@ -1009,6 +1009,8 @@ if [ "$WITH_DELEGATION" -eq 1 ]; then
   # from an IdP somebody else operates.
   DELEG_DIR="$STACK_UP_HOME/delegation"
   mkdir -p "$DELEG_DIR"
+  # Demo JWT signing keys live here; same posture as $TAIPAN_HOME above.
+  chmod 700 "$DELEG_DIR"
   if [ ! -f "$DELEG_DIR/signing.pem" ]; then
     log "vouchryx: minting a demo issuer, a signing key and a caller key"
     # The demo issuer gets a readable kid because it is named in
@@ -1174,7 +1176,12 @@ if [ "$WANT_POLICY" -eq 1 ]; then
 fi
 if [ "$WANT_POLICY" -eq 1 ]; then
   log "starting wardryx on :$WARDRYX_PORT (demo policy)"
+  # WARDRYX_ALLOW_DEVKEY: loopback dev run, the literal bearer devkey below;
+  # harmless on a wardryx that does not read this variable yet, and needed
+  # once it does (a future wardryx refuses to start with WARDRYX_KEYS empty
+  # unless this opt-in is set).
   WARDRYX_KEYS="" \
+  WARDRYX_ALLOW_DEVKEY="1" \
   WARDRYX_APPROVAL_SECRET="$WARDRYX_APPROVAL_SECRET" \
   WARDRYX_POLICY_ARCHIVE="$EVENTS_DIR/wardryx-policy-archive" \
     "$WARDRYX_BIN" serve -addr "127.0.0.1:$WARDRYX_PORT" -events "$EVENTS_DIR/wardryx.ndjson" -policy "$POLICY_FILE" \

@@ -31,6 +31,7 @@
   ],
   "schema": "taipanbox.dev/components/v1",
   "repo": "TAIPANBOX/stack-up",
+  "distribution": "git clone and ./up.sh (./down.sh, ./routines.sh) on one machine; builds every plane from source at whatever commit it finds, pinning no released image or tag",
   "kind": "launcher",
   "components": [
     {

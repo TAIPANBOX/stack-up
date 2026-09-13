@@ -339,6 +339,14 @@ Run it in the foreground and Ctrl-C stops everything. If you background it
 
 `down.sh` only signals the PIDs `up.sh` recorded when it launched each service.
 
+If one service exits on its own, `up.sh` notices within two seconds, names it,
+points at its log, and stops the rest. This is a single-host launcher, not a
+supervisor: nothing is restarted, and a half-alive stand would mislead more
+than a stopped one. To watch how the planes behave when one of them is gone
+(the gateway fails open on the policy plane and records it; scopyx fails
+closed), start those planes by hand with the same environment `up.sh` gives
+them, outside the launcher.
+
 ## Scheduled governance runs
 
 The stack produces governance signal on its own, but nobody looks at it

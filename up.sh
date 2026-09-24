@@ -1100,10 +1100,16 @@ if [ -n "$WARDRYX_URL" ]; then
   # /usr/bin/env bash resolves to on macOS, an empty array expansion is an
   # unbound-variable error. Written the short way this line breaks every run
   # that does NOT ask for delegation, which is all of them by default.
+  #
+  # TOKENFUSE_CACHE="off": unset, the gateway's semantic response cache
+  # defaults to shadow mode, which takes one global mutex per call and walks
+  # up to 10,000 cached entries computing cosine similarity, serving nothing.
+  # tokenfuse#319.
   env ${DELEG_ENV[@]+"${DELEG_ENV[@]}"} \
   TOKENFUSE_ADDR="127.0.0.1:$GATEWAY_PORT" \
   TOKENFUSE_ALLOW_STUB="1" \
   TOKENFUSE_MODE="enforce" \
+  TOKENFUSE_CACHE="off" \
   TOKENFUSE_EVENTS_PATH="$EVENTS_FILE" \
   TOKENFUSE_DATA_DIR="$STACK_UP_HOME/traces/gateway" \
   TOKENFUSE_CLOUD_URL="http://127.0.0.1:$CLOUD_PORT" \
@@ -1118,10 +1124,16 @@ else
   # /usr/bin/env bash resolves to on macOS, an empty array expansion is an
   # unbound-variable error. Written the short way this line breaks every run
   # that does NOT ask for delegation, which is all of them by default.
+  #
+  # TOKENFUSE_CACHE="off": unset, the gateway's semantic response cache
+  # defaults to shadow mode, which takes one global mutex per call and walks
+  # up to 10,000 cached entries computing cosine similarity, serving nothing.
+  # tokenfuse#319.
   env ${DELEG_ENV[@]+"${DELEG_ENV[@]}"} \
   TOKENFUSE_ADDR="127.0.0.1:$GATEWAY_PORT" \
   TOKENFUSE_ALLOW_STUB="1" \
   TOKENFUSE_MODE="enforce" \
+  TOKENFUSE_CACHE="off" \
   TOKENFUSE_EVENTS_PATH="$EVENTS_FILE" \
   TOKENFUSE_DATA_DIR="$STACK_UP_HOME/traces/gateway" \
   TOKENFUSE_CLOUD_URL="http://127.0.0.1:$CLOUD_PORT" \

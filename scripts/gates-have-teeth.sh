@@ -298,6 +298,13 @@ for f in ("up.sh", "routines.sh"):
 assert n == 2, "expected both launchers"')" \
 	"measured nothing"
 
+run_case "gateway-cache-is-off: no up.sh left to read" fail \
+	'./scripts/gateway-cache-is-off.sh' \
+	"$(py 'import subprocess, os
+assert os.path.exists("up.sh"), "expected up.sh"
+subprocess.run(["git", "mv", "up.sh", "up.bash"], check=True)')" \
+	"measured nothing"
+
 run_case "loopback-only: no launcher left to read" fail \
 	'./scripts/loopback-only.sh' \
 	"$(py 'import subprocess, os

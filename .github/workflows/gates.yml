@@ -33,6 +33,9 @@ jobs:
       - name: every gateway start names its upstream
         run: ./scripts/gateway-decides-its-upstream.sh
 
+      - name: the revocation key is never logged
+        run: ./scripts/revoke-key-not-printed.sh
+
       # Last, because it mutates tracked files and restores them. It needs a
       # clean tree and says so plainly, so it also reports any earlier step
       # that starts writing into the checkout.

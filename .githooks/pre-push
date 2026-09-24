@@ -35,6 +35,7 @@ step "shell syntax" "bash -n up.sh && bash -n down.sh && bash -n routines.sh"
 step "loopback only" "./scripts/loopback-only.sh"
 step "one trust domain" "./scripts/one-trust-domain.sh"
 step "gateway decides its upstream" "./scripts/gateway-decides-its-upstream.sh"
+step "revocation key not logged" "./scripts/revoke-key-not-printed.sh"
 
 echo
 if [ "$fail" -ne 0 ]; then

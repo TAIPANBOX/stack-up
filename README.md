@@ -58,8 +58,32 @@ revocation list: polling url=http://127.0.0.1:4310/v1/revocations
                  interval_ms=1000 fail_mode=Closed
 ```
 
-The whole loop, measured on 2026-08-27 against this launcher, using the client
-vouchryx ships:
+Since vouchryx's own on-disk revocation store landed (2026-09-23), a
+revocation also survives THIS launcher's own restart, which it did not
+before. `up.sh` mints a bearer key once, at
+`~/.stack-up/delegation/revoke.key` (0600, `umask 077`, reused on every later
+run, never printed to a log), and points vouchryx at its own revocation file,
+`~/.stack-up/delegation/revocations.ndjson`. Neither file sits under a path
+`./down.sh` touches, so `./down.sh` then `./up.sh --with-delegation` again
+keeps an earlier revocation in force rather than forgetting it:
+
+```sh
+D=~/.stack-up/delegation
+curl -X POST http://127.0.0.1:4310/v1/revoke \
+  -H "Authorization: Bearer $(cat "$D/revoke.key")" \
+  -d '{"subject":"agent://stack-up.local/demo","actor":"you","reason":"testing"}'
+./down.sh && ./up.sh --with-delegation
+curl http://127.0.0.1:4310/v1/revocations   # still lists the subject above
+```
+
+Measured 2026-09-24 on this launcher: the subject above stayed listed after a
+full `./down.sh` / `./up.sh` cycle, `revoke.key`'s sha256 and its `0600` mode
+were unchanged before and after, and running `./up.sh` again while the stack
+was still up (no `down.sh` first) refused cleanly on the busy gateway port
+without touching the key.
+
+The whole loop below, measured on 2026-08-27 against this launcher, using the
+client vouchryx ships:
 
 ```sh
 D=~/.stack-up/delegation; B=~/.taipan/bin
@@ -72,7 +96,7 @@ TOK=$("$B/vouchryx-demo" exchange -url http://127.0.0.1:4310 \
 | step | result |
 |---|---|
 | a call carrying that token and a fresh proof | HTTP 200 |
-| `POST :4310/v1/revoke` for `user://acme/ada` | `{"revoked":true}` |
+| `POST :4310/v1/revoke` for `user://acme/ada`, bearer `$(cat ~/.stack-up/delegation/revoke.key)` | `{"revoked":true}` |
 | the same token, after one poll | HTTP 401, `reason=BadToken` in the gateway log |
 | **the same revoked token, on a launcher started WITHOUT the flag** | **HTTP 200** |
 

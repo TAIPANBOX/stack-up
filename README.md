@@ -82,6 +82,14 @@ were unchanged before and after, and running `./up.sh` again while the stack
 was still up (no `down.sh` first) refused cleanly on the busy gateway port
 without touching the key.
 
+**The console can revoke now too, not only `curl`.** genaryx's
+`delegation_revoke` command (admin-only, passkey-gated) posts the same
+`POST /v1/revoke` this section's `curl` example does, if `genaryx-web` is
+started with `GENARYX_VOUCHRYX_URL` and `GENARYX_VOUCHRYX_REVOKE_KEY_FILE`
+pointing at this run's vouchryx and revoke key. `up.sh --with-delegation`
+prints the exact pair to export, in its closing summary, alongside the
+`curl` line above; it never starts `genaryx-web` itself.
+
 The whole loop below, measured on 2026-08-27 against this launcher, using the
 client vouchryx ships:
 

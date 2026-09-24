@@ -1792,6 +1792,9 @@ log "logs:    $LOGS_DIR"
 if [ "$WITH_DELEGATION" -eq 1 ]; then
   log "revoke:  POST http://127.0.0.1:$VOUCHRYX_PORT/v1/revoke   (bearer: key in $DELEG_DIR/revoke.key)"
   log "         survives a restart: ./down.sh then ./up.sh keeps every revocation in force"
+  log "console: genaryx's own delegation_revoke button needs these two, unset otherwise:"
+  printf '  GENARYX_VOUCHRYX_URL=http://127.0.0.1:%s GENARYX_VOUCHRYX_REVOKE_KEY_FILE=%s\n' \
+    "$VOUCHRYX_PORT" "$DELEG_DIR/revoke.key"
 fi
 if [ "$WANT_NOTIFY" -eq 1 ]; then
   log "mail:    $MAIL_FILE  (what the box would have written to you, unsent)"

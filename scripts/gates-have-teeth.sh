@@ -209,6 +209,14 @@ run_case "revoke-key-not-printed: the mint log prints the key itself" fail \
 	"$(py 'edit("up.sh", "log \"vouchryx: minting a revocation key\"", "log \"vouchryx: minting a revocation key: $(cat \"$DELEG_DIR/revoke.key\" 2>/dev/null)\"")')" \
 	"outside the VOUCHRYX_REVOKE_KEYS assignment"
 
+# The edit somebody makes without reading tokenfuse#319: drop the one
+# assignment that turns shadow mode off, on one of the two gateway starts.
+# edit() replaces only the first occurrence, so the other start still sets it.
+run_case "gateway-cache-is-off: one gateway start drops TOKENFUSE_CACHE" fail \
+	'./scripts/gateway-cache-is-off.sh' \
+	"$(py 'edit("up.sh", "  TOKENFUSE_CACHE=\"off\" \\", "")')" \
+	"does not set TOKENFUSE_CACHE"
+
 # The two launchers drift apart on the trust domain. This is the edit an
 # operator makes when the seal imports nothing: change the one they found,
 # leave the other, and the same records directory is then sealed under one
@@ -259,6 +267,12 @@ run_case "revoke-key-not-printed: only the path is named, not the content" pass 
 	'./scripts/revoke-key-not-printed.sh' \
 	"$(py 'edit("up.sh", "log \"vouchryx: minting a revocation key\"", "log \"vouchryx: minting a revocation key\"\n    log \"vouchryx: revocation key at $DELEG_DIR/revoke.key\"")')"
 
+# An unrelated variable added to the same backslash-continued block must not
+# make the gate stop finding TOKENFUSE_CACHE="off" in it.
+run_case "gateway-cache-is-off: an unrelated var added to the block" pass \
+	'./scripts/gateway-cache-is-off.sh' \
+	"$(py 'edit("up.sh", "TOKENFUSE_CLOUD_KEY=\"devkey\" \\\n", "TOKENFUSE_CLOUD_KEY=\"devkey\" \\\nTOKENFUSE_SPARE=\"1\" \\\n")')"
+
 # up.sh reads the domain from the environment and routines.sh from a file.
 # Both are correct and they LOOK different; a gate comparing the raw lines
 # rather than the defaults would fire on a tree that is right.
@@ -282,6 +296,13 @@ for f in ("up.sh", "routines.sh"):
         subprocess.run(["git", "mv", f, f[:-3] + ".bash"], check=True)
         n += 1
 assert n == 2, "expected both launchers"')" \
+	"measured nothing"
+
+run_case "gateway-cache-is-off: no up.sh left to read" fail \
+	'./scripts/gateway-cache-is-off.sh' \
+	"$(py 'import subprocess, os
+assert os.path.exists("up.sh"), "expected up.sh"
+subprocess.run(["git", "mv", "up.sh", "up.bash"], check=True)')" \
 	"measured nothing"
 
 run_case "loopback-only: no launcher left to read" fail \

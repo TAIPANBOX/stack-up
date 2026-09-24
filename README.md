@@ -466,6 +466,9 @@ line up numerically - that is expected, not a bug.
   activates the literal bearer `devkey`. That is a **dev credential for a local
   sandbox** and nothing else. Do not run this on a host anything else can reach.
 - `idryx serve` has no authentication of its own by design (loopback only).
+- The gateway's semantic response cache is off (`TOKENFUSE_CACHE=off`): left
+  on, its shadow-mode default serialises every call on one lock instead of
+  serving anything (tokenfuse#319).
 - There is no telemetry. The only network access is cloning the repos and
   fetching build dependencies.
 

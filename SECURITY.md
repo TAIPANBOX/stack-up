@@ -26,5 +26,5 @@ one is tagged.
 ## Verifying a build
 
 Every change passes the repository's gates before merge: `shellcheck up.sh
-down.sh routines.sh`, `bash -n` on all three, `scripts/loopback-only.sh` and
-`scripts/gates-have-teeth.sh`.
+down.sh routines.sh`, `bash -n` on all three, `scripts/loopback-only.sh`,
+`scripts/gateway-cache-is-off.sh` and `scripts/gates-have-teeth.sh`.

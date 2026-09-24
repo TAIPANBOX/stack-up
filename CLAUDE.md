@@ -30,6 +30,7 @@ bash -n up.sh && bash -n down.sh && bash -n routines.sh
 ./scripts/loopback-only.sh
 ./scripts/one-trust-domain.sh
 ./scripts/gateway-decides-its-upstream.sh
+./scripts/gateway-cache-is-off.sh
 ./scripts/revoke-key-not-printed.sh
 ./scripts/gates-have-teeth.sh   # invariant 6; needs a clean tree
 ```
@@ -188,6 +189,14 @@ building here and the thing that most often gets skipped.
    the same reason invariants 2 and 3 don't: it needs a real
    run-twice-then-teardown test, which nothing here has yet, and is instead
    shown by hand in the commit that added this invariant.)*
+
+9. **The gateway's semantic response cache is turned off explicitly, not left
+   to its default.** `@decided 2026-09-24`: unset, tokenfuse's gateway enables
+   the cache in shadow mode, which takes one global mutex per call and walks
+   up to 10,000 cached entries computing cosine similarity, serving nothing;
+   this launcher sets `TOKENFUSE_CACHE="off"` on every gateway start instead
+   (tokenfuse#319).
+   *(gate: `scripts/gateway-cache-is-off.sh`)*
 
 An approved architecture decision is **not finished** until it is two things: a
 numbered invariant in this file, and a gate in a script if it can be checked

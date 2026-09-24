@@ -204,6 +204,11 @@ run_case "loopback-only: a launcher URL leaves loopback" fail \
 	"$(py 'edit("up.sh", "WARDRYX_URL=\"http://127.0.0.1:$WARDRYX_PORT\"", "WARDRYX_URL=\"http://0.0.0.0:$WARDRYX_PORT\"")')" \
 	"is not loopback"
 
+run_case "revoke-key-not-printed: the mint log prints the key itself" fail \
+	'./scripts/revoke-key-not-printed.sh' \
+	"$(py 'edit("up.sh", "log \"vouchryx: minting a revocation key\"", "log \"vouchryx: minting a revocation key: $(cat \"$DELEG_DIR/revoke.key\" 2>/dev/null)\"")')" \
+	"outside the VOUCHRYX_REVOKE_KEYS assignment"
+
 # The two launchers drift apart on the trust domain. This is the edit an
 # operator makes when the seal imports nothing: change the one they found,
 # leave the other, and the same records directory is then sealed under one
@@ -249,6 +254,10 @@ echo "=== and what they must NOT catch ==="
 run_case "loopback-only: a placeholder, a reference and an address in prose" pass \
 	'./scripts/loopback-only.sh' \
 	"$(py 'edit("up.sh", "WARDRYX_URL=\"\"", "WARDRYX_URL=\"\"\nSPARE_URL=\"\"\nMIRROR_URL=\"$WARDRYX_URL\"\n# see https://example.com/docs for why this is loopback only")')"
+
+run_case "revoke-key-not-printed: only the path is named, not the content" pass \
+	'./scripts/revoke-key-not-printed.sh' \
+	"$(py 'edit("up.sh", "log \"vouchryx: minting a revocation key\"", "log \"vouchryx: minting a revocation key\"\n    log \"vouchryx: revocation key at $DELEG_DIR/revoke.key\"")')"
 
 # up.sh reads the domain from the environment and routines.sh from a file.
 # Both are correct and they LOOK different; a gate comparing the raw lines

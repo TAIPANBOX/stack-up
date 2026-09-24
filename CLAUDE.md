@@ -28,6 +28,9 @@ out weeks later and trust nothing else we ship.
 shellcheck up.sh down.sh routines.sh
 bash -n up.sh && bash -n down.sh && bash -n routines.sh
 ./scripts/loopback-only.sh
+./scripts/one-trust-domain.sh
+./scripts/gateway-decides-its-upstream.sh
+./scripts/revoke-key-not-printed.sh
 ./scripts/gates-have-teeth.sh   # invariant 6; needs a clean tree
 ```
 
@@ -162,6 +165,25 @@ building here and the thing that most often gets skipped.
    *(gate: `scripts/one-trust-domain.sh`, with four cases in
    `gates-have-teeth.sh`: the two launchers disagreeing, the backstop removed,
    the check moved after the import loop, and both subjects renamed away)*
+
+8. **The delegation bring-up keeps a revocation across a restart, and its key
+   is a secret, not a demo value.** `--with-delegation` points vouchryx at an
+   on-disk revocation store (`$STACK_UP_HOME/delegation/revocations.ndjson`)
+   and mints a bearer key once, at `$STACK_UP_HOME/delegation/revoke.key`
+   (0600, `umask 077` before the file is written), reusing it on every later
+   run rather than rotating it: a rotation revokes nothing, it only orphans a
+   revocation recorded under the old key. Neither file sits under a path
+   `down.sh` touches, so `./down.sh` then `./up.sh --with-delegation` keeps an
+   earlier revocation in force rather than forgetting it, which is what this
+   launcher did on every restart before vouchryx's own revocation store
+   existed.
+   *(partly gated: `scripts/revoke-key-not-printed.sh` proves the key's
+   content is read once and handed straight to vouchryx's own environment,
+   never to a `log`/`warn`/`echo`/`printf` call. What it does not cover: that
+   a revocation actually survives the restart. That half has no script, for
+   the same reason invariants 2 and 3 don't: it needs a real
+   run-twice-then-teardown test, which nothing here has yet, and is instead
+   shown by hand in the commit that added this invariant.)*
 
 An approved architecture decision is **not finished** until it is two things: a
 numbered invariant in this file, and a gate in a script if it can be checked

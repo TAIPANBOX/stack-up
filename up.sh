@@ -1027,14 +1027,48 @@ if [ "$WITH_DELEGATION" -eq 1 ]; then
       fi
     done
   fi
+
+  # The revocation key, checked independently of the signing.pem guard above:
+  # an operator upgrading an existing $DELEG_DIR already has signing.pem, so
+  # that guard never fires again, and this key would never get minted if it
+  # were nested inside it. Reused on every later run, like the three keys
+  # above, and never rotated by this launcher: rotating it would not revoke
+  # anything, it would only make a revocation an operator already recorded
+  # under the old key unreachable through the new one.
+  #
+  # 32 random bytes as lowercase hex, the plain shape VOUCHRYX_REVOKE_KEYS
+  # expects (vouchryx README, "Configuration"): a bearer credential, not a
+  # signing key, so vouchryx-demo (which only mints EC keys) is the wrong tool
+  # here. `umask 077` first, so the file is born 0600 and is never briefly
+  # world-readable between create and chmod.
+  if [ "$WITH_DELEGATION" -eq 1 ] && [ ! -f "$DELEG_DIR/revoke.key" ]; then
+    log "vouchryx: minting a revocation key"
+    if ! ( umask 077 && od -An -tx1 -N32 /dev/urandom | tr -d ' \n' > "$DELEG_DIR/revoke.key" ); then
+      warn "could not mint the revocation key; skipping delegation."; WITH_DELEGATION=0
+      rm -f "$DELEG_DIR/revoke.key"
+    fi
+  fi
 fi
 if [ "$WITH_DELEGATION" -eq 1 ]; then
   log "starting vouchryx on :$VOUCHRYX_PORT (demo issuer, 5 min tokens)"
+  # VOUCHRYX_REVOCATIONS_PATH is what makes a revocation survive the restart
+  # below: vouchryx syncs it to this file before POST /v1/revoke answers 200,
+  # and restores from it at startup (vouchryx CLAUDE.md invariant 17). Losing
+  # this path is not a smaller version of delegation, it is delegation that
+  # forgets every revocation the moment the process restarts, which is the
+  # exact failure this block exists to close.
+  #
+  # VOUCHRYX_REVOKE_KEYS is read straight from the key file into the child's
+  # environment, never through a named variable of this script's own: nothing
+  # here logs it, and nothing here needs to hold it a moment longer than the
+  # one assignment that hands it to vouchryx.
   VOUCHRYX_ADDR="127.0.0.1:$VOUCHRYX_PORT" \
   VOUCHRYX_ISSUER="http://127.0.0.1:$VOUCHRYX_PORT" \
   VOUCHRYX_SIGNING_KEY="$DELEG_DIR/signing.pem" \
   VOUCHRYX_TRUSTED_ISSUERS="https://idp.stack-up.local|http://127.0.0.1:$VOUCHRYX_PORT|$DELEG_DIR/idp.jwks.json" \
   VOUCHRYX_EVENTS_PATH="$EVENTS_DIR/vouchryx.ndjson" \
+  VOUCHRYX_REVOCATIONS_PATH="$DELEG_DIR/revocations.ndjson" \
+  VOUCHRYX_REVOKE_KEYS="$(cat "$DELEG_DIR/revoke.key")" \
     "$VOUCHRYX_BIN" > "$LOGS_DIR/vouchryx.log" 2>&1 &
   register vouchryx "$!" TERM
   if wait_health vouchryx "$VOUCHRYX_PORT" "$!" "/.well-known/jwks.json"; then
@@ -1755,6 +1789,10 @@ fi
 echo
 log "events:  $EVENTS_DIR"
 log "logs:    $LOGS_DIR"
+if [ "$WITH_DELEGATION" -eq 1 ]; then
+  log "revoke:  POST http://127.0.0.1:$VOUCHRYX_PORT/v1/revoke   (bearer: key in $DELEG_DIR/revoke.key)"
+  log "         survives a restart: ./down.sh then ./up.sh keeps every revocation in force"
+fi
 if [ "$WANT_NOTIFY" -eq 1 ]; then
   log "mail:    $MAIL_FILE  (what the box would have written to you, unsent)"
 fi

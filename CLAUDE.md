@@ -176,7 +176,11 @@ building here and the thing that most often gets skipped.
    `down.sh` touches, so `./down.sh` then `./up.sh --with-delegation` keeps an
    earlier revocation in force rather than forgetting it, which is what this
    launcher did on every restart before vouchryx's own revocation store
-   existed.
+   existed. The closing summary also hands genaryx's own console the two
+   variables it needs to revoke from there instead of `curl`
+   (`GENARYX_VOUCHRYX_URL`, `GENARYX_VOUCHRYX_REVOKE_KEY_FILE`, the second a
+   PATH, never the key's content), printed for the operator to export, since
+   this launcher does not start `genaryx-web` itself.
    *(partly gated: `scripts/revoke-key-not-printed.sh` proves the key's
    content is read once and handed straight to vouchryx's own environment,
    never to a `log`/`warn`/`echo`/`printf` call. What it does not cover: that

@@ -86,8 +86,9 @@
 #                       Runs with TYPRYX_BACKEND=stub, free and deterministic,
 #                       never a paid or external call; its journal and ledger
 #                       live under their own directory, not the shared event
-#                       bus, because typryx's event types are not yet
-#                       registered there. See README.md for how an operator
+#                       bus (its event types are registered in agent-passport
+#                       since 2026-09-25; moving the journal onto the bus is
+#                       a separate choice not made yet). See README.md for how an operator
 #                       switches to a real backend.
 #   --force-install     replace binaries another tool installed (default: leave
 #                       them alone and use them as they are)
@@ -1541,13 +1542,14 @@ fi
 # chosen here, and TYPRYX_BACKEND=jev (a paid, external backend) is never
 # chosen by this launcher at all.
 #
-# THE STATE DIRECTORY is its own, not the shared event bus: typryx's four
-# event types (typed_answer, typed_unanswered, typed_refused,
-# calibration_drift) are not yet registered in agent-passport's own event
-# schema, so a journal placed under $EVENTS_DIR would be picked up by
-# trailryx-seal's *.ndjson import and mapped as an unregistered source. Kept
-# under $STACK_UP_HOME/typryx instead, the same way costcrew's own data
-# directory sits beside, not inside, the shared bus.
+# THE STATE DIRECTORY is its own, not the shared event bus: a journal placed
+# under $EVENTS_DIR would be picked up by trailryx-seal's *.ndjson import.
+# typryx's four event types (typed_answer, typed_unanswered, typed_refused,
+# calibration_drift) are registered in agent-passport SPEC 6.2 since
+# 2026-09-25, so that import would now map them; moving the journal there is
+# a separate choice not made yet. Until then it is kept under
+# $STACK_UP_HOME/typryx, the way costcrew's own data directory sits beside,
+# not inside, the shared bus.
 if [ "$WITH_TYPED" -eq 1 ]; then
   TYPRYX_REPO="$(locate_repo typryx)" || { warn "could not fetch typryx; skipping."; WITH_TYPED=0; }
 fi

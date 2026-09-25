@@ -40,6 +40,7 @@ Everything binds to `127.0.0.1` only.
 | scopyx | 4300 | Governed web egress. Agents fetch **through** it, and wardryx decides every destination before anything leaves. `./up.sh` makes one call through it, to the cloud metadata address, which is refused on its address before a packet leaves the machine: read the refusal in `~/.stack-up/events/scopyx.ndjson` and the alert it raised in `~/.stack-up/mail.txt`. `--no-egress` skips it. |
 | vouchryx | 4310 | The delegation-token service, **only with `--with-delegation`**. Issues RFC 8693 tokens bound to a key the caller proved it holds, and the revocation list the gateway polls. Without the flag the gateway's delegation door stays shut, and a chain reaching the policy plane is one the CALLER asserted. |
 | costcrew | 8321 | The FinOps console, **only with `--with-finops`**. Cloud and AI spend, an agent crew that triages it, and a person who reviews what they wrote. A guest producer: it writes the shared bus and calls nobody, and it enforces nothing. |
+| typryx | 4320 | Typed answers with a probability, **only with `--with-typed`**. A choice, a score, or a yes/no, each with a probability, instead of a sentence a policy cannot threshold. Runs with the free, deterministic `stub` backend; without the flag the stack behaves exactly as before. |
 
 The money plane (gateway + cloud + dashboard) is mandatory; the rest degrade
 gracefully. If a toolchain or a port is missing, stack-up says so and brings up
@@ -149,6 +150,43 @@ path, and every `budget_threshold` it emits carries `enforced: false`, stamped
 by the translation rather than by the caller. `tools/enforce` in that repository
 is what pushes a budget to TokenFuse, it is a separate binary, and this launcher
 does not start it.
+
+### Typed answers, and what stub means
+
+`./up.sh --with-typed` also starts typryx: a small service that turns a
+yes/no or which-one question into a `choice`, `score`, or `noul` answer, each
+with a probability, instead of a sentence a policy cannot threshold. Absent
+the flag, the stack behaves exactly as it did before typryx existed.
+
+It runs with `TYPRYX_BACKEND=stub`: free, deterministic, and makes no
+outbound call, so this launcher never chooses a paid or external backend on
+its own. To point a run at a real model instead, export
+`TYPRYX_BACKEND=openai-logprobs` together with `TYPRYX_OPENAI_URL` and
+`TYPRYX_OPENAI_MODEL` (optionally `TYPRYX_OPENAI_KEY_FILE`, a path to a bearer
+key, never the key itself) before calling `./up.sh --with-typed`; see
+typryx's own README for the full backend contract. `TYPRYX_BACKEND=jev`, a
+paid backend, is never set by this launcher.
+
+The door key is generated fresh on every run, held only in this process's
+environment, and never written to a file, the same posture as scopyx's own
+key just above it. The closing summary prints it once, together with a
+ready-to-run `curl` line, so it is only ever useful for that one run:
+
+```sh
+./up.sh --with-typed
+# ... prints something like:
+#   typryx:  http://127.0.0.1:4320  (key: <40 random chars>, stub backend, minted fresh this run)
+#   curl -s -X POST http://127.0.0.1:4320/v1/ask -H "X-Typryx-Key: <key>" ...
+```
+
+typryx's journal and ledger live under `~/.stack-up/typryx/`, not the shared
+`~/.stack-up/events/` directory trailryx-seal imports from. `@decided
+2026-09-25`: typryx's four event types (`typed_answer`, `typed_unanswered`,
+`typed_refused`, `calibration_drift`) are not yet registered in
+agent-passport's event schema, so a journal on the shared bus would be
+imported as an unregistered source; the same reasoning already keeps
+vouchryx's revocation store and costcrew's data directory off paths other
+planes read as their own.
 
 ## What it installs but does not start
 
@@ -504,6 +542,8 @@ Everything that is only stack-up's business stays under `~/.stack-up/`
                plane was skipped)
   logs/        one log file per service
   pids/        recorded PIDs, used by down.sh
+  typryx/      journal + ledger, only with --with-typed (its own path,
+               deliberately not under events/; see "Typed answers" above)
 ```
 
 Earlier versions kept the binaries in `~/.stack-up/bin`. They are moved on the

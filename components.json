@@ -46,6 +46,7 @@
           "heraldyx",
           "idryx",
           "scopyx",
+          "typryx",
           "vouchryx",
           "wardryx"
         ],
@@ -70,7 +71,8 @@
         ],
         "profiles": [
           "delegation",
-          "finops"
+          "finops",
+          "typed"
         ]
       },
       "declared": {
@@ -81,6 +83,10 @@
         "mockryx_is_scheduled_and_not_supervised": {
           "value": "mockryx-drill",
           "why": "It appears in `schedules_routines` and in no other list. A drill runs and exits, so there is no process to register, and it is opt-in everywhere, which is why it is absent from routines_by_default too."
+        },
+        "typryx_journal_is_not_on_the_shared_bus": {
+          "value": "$STACK_UP_HOME/typryx/events.ndjson, $STACK_UP_HOME/typryx/ledger",
+          "why": "@decided 2026-09-25: typryx's four event types (typed_answer, typed_unanswered, typed_refused, calibration_drift) are not yet registered in agent-passport's event schema, so a journal placed under $STACK_UP_HOME/events would be picked up by trailryx-seal's *.ndjson import as an unregistered source. Kept on its own path instead, the same way costcrew's own data directory sits beside, not inside, the shared bus. TYPRYX_BACKEND is always stub here: free, deterministic, no outbound call."
         }
       }
     }

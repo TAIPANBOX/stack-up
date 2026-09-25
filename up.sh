@@ -79,6 +79,16 @@
 #                       launcher's bus and minting its agents under the same
 #                       trust domain the record plane is given, so what it
 #                       emits is sealed rather than refused.
+#   --with-typed        also start typryx, a typed-answer service (a choice, a
+#                       score, or a yes/no, each with a probability, instead of
+#                       a sentence a policy cannot threshold). Opt-in add-on:
+#                       without the flag the stack behaves exactly as before.
+#                       Runs with TYPRYX_BACKEND=stub, free and deterministic,
+#                       never a paid or external call; its journal and ledger
+#                       live under their own directory, not the shared event
+#                       bus, because typryx's event types are not yet
+#                       registered there. See README.md for how an operator
+#                       switches to a real backend.
 #   --force-install     replace binaries another tool installed (default: leave
 #                       them alone and use them as they are)
 #   --workspace <dir>   look here for sibling checkouts before cloning
@@ -165,6 +175,7 @@ IDRYX_PORT=8081
 SCOPYX_PORT=4300
 VOUCHRYX_PORT=4310
 COSTCREW_PORT=8321
+TYPRYX_PORT=4320
 
 # --------------------------------------------------------------------------
 # Options
@@ -179,6 +190,7 @@ NO_NOTIFY=0
 NO_EGRESS=0
 WITH_DELEGATION=0
 WITH_FINOPS=0
+WITH_TYPED=0
 FORCE_INSTALL=0
 WORKSPACE="${STACK_UP_WORKSPACE:-$(dirname "$SCRIPT_DIR")}"
 
@@ -206,6 +218,7 @@ while [ $# -gt 0 ]; do
     --no-egress) NO_EGRESS=1 ;;
     --with-delegation) WITH_DELEGATION=1 ;;
     --with-finops) WITH_FINOPS=1 ;;
+    --with-typed) WITH_TYPED=1 ;;
     --force-install) FORCE_INSTALL=1 ;;
     --workspace) shift; WORKSPACE="${1:-}"; [ -n "$WORKSPACE" ] || { echo "stack-up: --workspace needs a directory" >&2; exit 2; } ;;
     -h|--help) usage; exit 0 ;;
@@ -1497,6 +1510,90 @@ if [ "$WITH_FINOPS" -eq 1 ]; then
 fi
 
 # --------------------------------------------------------------------------
+# typryx (optional, --with-typed): typed answers with a probability.
+#
+# An OPTIONAL add-on, the same shape as the two profiles above: without the
+# flag this launcher behaves exactly as before it existed. What it adds is a
+# small service that turns a yes/no or which-one question into a `choice`,
+# `score`, or `noul` answer with a probability for every option, instead of a
+# sentence a policy cannot threshold.
+#
+# HOW THE BINARY IS OBTAINED. Same as vouchryx and scopyx above: a sibling
+# checkout is reused if present, otherwise `locate_repo` shallow-clones it, and
+# the binary is built from source with `go build`, never pulled as a
+# container image. This launcher builds every plane from source and runs no
+# containers (CLAUDE.md invariant 1's neighbourhood); the published
+# `ghcr.io/taipanbox/typryx` image is for stack-single and stack-k8s, which
+# already run everything else as containers.
+#
+# THE KEY, handled exactly as scopyx's is just above: a random bearer secret,
+# generated fresh on every run, held only in this process's environment and
+# never written to a file. It is printed once in the closing summary so an
+# operator or an MCP client config for THIS run can use it; a restart mints a
+# new one, the same "same generation, same 'empty refuses to start' stance" as
+# scopyx, and unlike vouchryx's revoke key there is nothing here that needs to
+# survive a restart.
+#
+# THE BACKEND is `stub` unless the operator exported another one: free,
+# deterministic, and makes no outbound call. To point a run at a local model server instead, export
+# TYPRYX_BACKEND=openai-logprobs plus TYPRYX_OPENAI_URL and TYPRYX_OPENAI_MODEL
+# (optionally TYPRYX_OPENAI_KEY_FILE) before calling this script; it is never
+# chosen here, and TYPRYX_BACKEND=jev (a paid, external backend) is never
+# chosen by this launcher at all.
+#
+# THE STATE DIRECTORY is its own, not the shared event bus: typryx's four
+# event types (typed_answer, typed_unanswered, typed_refused,
+# calibration_drift) are not yet registered in agent-passport's own event
+# schema, so a journal placed under $EVENTS_DIR would be picked up by
+# trailryx-seal's *.ndjson import and mapped as an unregistered source. Kept
+# under $STACK_UP_HOME/typryx instead, the same way costcrew's own data
+# directory sits beside, not inside, the shared bus.
+if [ "$WITH_TYPED" -eq 1 ]; then
+  TYPRYX_REPO="$(locate_repo typryx)" || { warn "could not fetch typryx; skipping."; WITH_TYPED=0; }
+fi
+if [ "$WITH_TYPED" -eq 1 ]; then
+  migrate_legacy typryx
+  TYPRYX_BIN="$BIN_DIR/typryx"
+  if foreign_binary typryx; then
+    log "typryx: already installed by another tool; using $TYPRYX_BIN"
+  elif installed_by_us typryx && ! stale_paths "$MARKERS_DIR/.marker-typryx" "$TYPRYX_REPO/cmd" "$TYPRYX_REPO/internal" "$TYPRYX_REPO/go.mod"; then
+    log "typryx: up to date, skipping build"
+  else
+    log "typryx: building (Go)"
+    if ! ( cd "$TYPRYX_REPO" && go build -o "$BUILD_DIR/typryx" ./cmd/typryx ) \
+       || ! install_binary typryx "$BUILD_DIR/typryx"; then
+      warn "typryx build failed; skipping."; WITH_TYPED=0
+    else
+      : > "$MARKERS_DIR/.marker-typryx"
+    fi
+  fi
+fi
+if [ "$WITH_TYPED" -eq 1 ]; then
+  # Generated per run, never committed and never written to disk; see the
+  # comment above this block for why that matches scopyx rather than
+  # vouchryx's revoke key.
+  TYPRYX_SECRET="$( set +o pipefail; LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 40 )"
+  TYPRYX_AGENT="agent://local.invalid/typryx-demo"
+  TYPRYX_DIR="$STACK_UP_HOME/typryx"
+  mkdir -p "$TYPRYX_DIR"
+
+  # `stub` unless the operator exported another backend before calling this
+  # script (see the comment above); this launcher never picks one itself.
+  TYPRYX_BACKEND="${TYPRYX_BACKEND:-stub}"
+  log "starting typryx on :$TYPRYX_PORT ($TYPRYX_BACKEND backend, journal + ledger under $TYPRYX_DIR)"
+  TYPRYX_ADDR="127.0.0.1:$TYPRYX_PORT" \
+  TYPRYX_KEYS="$TYPRYX_SECRET=$TYPRYX_AGENT" \
+  TYPRYX_BACKEND="$TYPRYX_BACKEND" \
+  TYPRYX_TEMPLATES="$TYPRYX_REPO/examples/templates" \
+  TYPRYX_EVENTS="$TYPRYX_DIR/events.ndjson" \
+  TYPRYX_LEDGER_DIR="$TYPRYX_DIR/ledger" \
+    "$TYPRYX_BIN" > "$LOGS_DIR/typryx.log" 2>&1 &
+  register typryx "$!" TERM
+  wait_health typryx "$TYPRYX_PORT" "$!" "/healthz" || \
+    warn "typryx did not come up; the rest of the stack is unaffected."
+fi
+
+# --------------------------------------------------------------------------
 # Wave 2 (optional): the four tools that are installed, not started.
 #
 # None of these is a server. qryx scans a path and exits; mockryx fires at a
@@ -1810,6 +1907,12 @@ if [ "$WITH_DELEGATION" -eq 1 ]; then
 fi
 if [ "$WANT_NOTIFY" -eq 1 ]; then
   log "mail:    $MAIL_FILE  (what the box would have written to you, unsent)"
+fi
+if [ "$WITH_TYPED" -eq 1 ]; then
+  log "typryx:  http://127.0.0.1:$TYPRYX_PORT  (key: $TYPRYX_SECRET, $TYPRYX_BACKEND backend, minted fresh this run)"
+  printf '  curl -s -X POST http://127.0.0.1:%s/v1/ask -H "X-Typryx-Key: %s" -H "Content-Type: application/json" -d '"'"'{"template":"eval.outcome_met","state":{"task":"2+2","final_answer":"4"}}'"'"'\n' \
+    "$TYPRYX_PORT" "$TYPRYX_SECRET"
+  log "         journal: $TYPRYX_DIR/events.ndjson   ledger: $TYPRYX_DIR/ledger"
 fi
 if [ "$WANT_RECORDS" -eq 1 ]; then
   echo

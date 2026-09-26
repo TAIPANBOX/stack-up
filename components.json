@@ -86,7 +86,8 @@
         },
         "typryx_journal_is_not_on_the_shared_bus": {
           "value": "$STACK_UP_HOME/typryx/events.ndjson, $STACK_UP_HOME/typryx/ledger",
-          "why": "@decided 2026-09-25: typryx's four event types (typed_answer, typed_unanswered, typed_refused, calibration_drift) are not yet registered in agent-passport's event schema, so a journal placed under $STACK_UP_HOME/events would be picked up by trailryx-seal's *.ndjson import as an unregistered source. Kept on its own path instead, the same way costcrew's own data directory sits beside, not inside, the shared bus. TYPRYX_BACKEND is always stub here: free, deterministic, no outbound call."
+          "why": "@decided 2026-09-25: typryx's four event types (typed_answer, typed_unanswered, typed_refused, calibration_drift) are not yet registered in agent-passport's event schema, so a journal placed under $STACK_UP_HOME/events would be picked up by trailryx-seal's *.ndjson import as an unregistered source. Kept on its own path instead, the same way costcrew's own data directory sits beside, not inside, the shared bus. TYPRYX_BACKEND is always stub here: free, deterministic, no outbound call.",
+          "note": "@claude 2026-09-25: the registration this reason waits on has landed (agent-passport#67, SPEC 6.2 lists all four types), so the reason no longer holds. The placement is unchanged until moving the journal onto the shared bus is decided on its own."
         }
       }
     }

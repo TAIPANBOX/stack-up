@@ -186,7 +186,10 @@ typryx's journal and ledger live under `~/.stack-up/typryx/`, not the shared
 agent-passport's event schema, so a journal on the shared bus would be
 imported as an unregistered source; the same reasoning already keeps
 vouchryx's revocation store and costcrew's data directory off paths other
-planes read as their own.
+planes read as their own. `@claude` 2026-09-25: that registration has since
+landed (agent-passport#67, SPEC 6.2), so the reason above no longer holds;
+the journal stays where it is until moving it onto the bus is decided on its
+own.
 
 ## What it installs but does not start
 

@@ -41,6 +41,7 @@ Everything binds to `127.0.0.1` only.
 | vouchryx | 4310 | The delegation-token service, **only with `--with-delegation`**. Issues RFC 8693 tokens bound to a key the caller proved it holds, and the revocation list the gateway polls. Without the flag the gateway's delegation door stays shut, and a chain reaching the policy plane is one the CALLER asserted. |
 | costcrew | 8321 | The FinOps console, **only with `--with-finops`**. Cloud and AI spend, an agent crew that triages it, and a person who reviews what they wrote. A guest producer: it writes the shared bus and calls nobody, and it enforces nothing. |
 | typryx | 4320 | Typed answers with a probability, **only with `--with-typed`**. A choice, a score, or a yes/no, each with a probability, instead of a sentence a policy cannot threshold. Runs with the free, deterministic `stub` backend; without the flag the stack behaves exactly as before. |
+| tokenfuse-mcp-broker | 4200 | tokenfuse's own MCP credential broker, **also with `--with-typed`**, fronting typryx: an agent authenticates to this one door instead of typryx's own. tokenfuse's code is unchanged; this is configuration only. |
 
 The money plane (gateway + cloud + dashboard) is mandatory; the rest degrade
 gracefully. If a toolchain or a port is missing, stack-up says so and brings up
@@ -179,17 +180,82 @@ ready-to-run `curl` line, so it is only ever useful for that one run:
 #   curl -s -X POST http://127.0.0.1:4320/v1/ask -H "X-Typryx-Key: <key>" ...
 ```
 
-typryx's journal and ledger live under `~/.stack-up/typryx/`, not the shared
-`~/.stack-up/events/` directory trailryx-seal imports from. `@decided
-2026-09-25`: typryx's four event types (`typed_answer`, `typed_unanswered`,
-`typed_refused`, `calibration_drift`) are not yet registered in
-agent-passport's event schema, so a journal on the shared bus would be
-imported as an unregistered source; the same reasoning already keeps
-vouchryx's revocation store and costcrew's data directory off paths other
-planes read as their own. `@claude` 2026-09-25: that registration has since
-landed (agent-passport#67, SPEC 6.2), so the reason above no longer holds;
-the journal stays where it is until moving it onto the bus is decided on its
-own.
+typryx's journal now lives at `~/.stack-up/events/typryx.ndjson`, on the
+shared bus trailryx-seal reads, and its ledger stays on its own path,
+`~/.stack-up/typryx/ledger`. `@decided 2026-09-26`: agent-passport SPEC 6.2
+(agent-passport#67) registers typryx's four event types (`typed_answer`,
+`typed_unanswered`, `typed_refused`, `calibration_drift`) in the estate's own
+event schema, so the earlier reason for keeping this journal off the bus (an
+unregistered source trailryx-seal's `*.ndjson` import would pick up blind) no
+longer holds; the same reasoning still keeps vouchryx's revocation store and
+costcrew's own data directory off paths other planes read as their own.
+
+**Registered is not the same as sealed.** typryx emits schema
+`agent-event/v1.0`, which trailryx-agentevent does not accept yet (it reads
+`v0.1` through `v0.3`), so trailryx-seal reads this file and refuses every
+line in it for `unknown_schema`, before the event type is ever inspected -
+measured 2026-09-26 against this launcher's own run. The practical outcome is
+the one roughly forty other unmapped or unrecognized event types already get
+on this bus (counted, not sealed; see "The record plane" below). Moving the
+journal onto the bus stops it being an unregistered source; it does not make
+trailryx seal it. `heraldyx` reads the whole events
+directory regardless of what trailryx maps, so a `typed_unanswered`,
+`typed_refused`, or `calibration_drift` line now reaches `~/.stack-up/mail.txt`
+the same way any other medium-or-above event does. That is expected, not a
+new leak: the bus is exactly what heraldyx has always watched.
+
+### Connecting to typryx through tokenfuse's own MCP broker
+
+`--with-typed` also starts tokenfuse's `mcp-broker` subcommand
+(`tokenfuse-mcp-broker` above), fronting typryx: an agent authenticates to the
+broker's one door instead of typryx's own, the same door the rest of the
+estate already uses for MCP tool calls. **tokenfuse's code is not changed for
+this**: it runs exactly as it does without typryx, and typryx joins it purely
+through the broker's own documented environment contract
+(`TOKENFUSE_MCP_UPSTREAM(S)`, `TOKENFUSE_MCP_KEYS`, `TOKENFUSE_MCP_SECRETS`,
+`TOKENFUSE_MCP_SECRET_SCOPES`).
+
+A brokered `tools/call` reaches typryx with only a content-type header: no
+credential, no agent identity of its own. So the credential travels as a
+resolved secret handle instead: this launcher hands the broker typryx's
+per-run key under `typryx_key`, scoped to typryx's three tools, and a caller
+carries only `{{secret:typryx_key}}` at `params._meta["typryx/key"]`. typryx
+reads a credential from that place because this launcher sets
+`TYPRYX_ACCEPT_KEY_IN_META=1` (off in typryx by default); see typryx's own
+README, "Connect it", for the full contract.
+
+The broker's own client key is minted fresh per run, the same posture as
+typryx's and scopyx's: a loopback bind does not require one, and this
+launcher mints one anyway so the printed example shows the real shape a real
+deployment would need.
+
+```sh
+./up.sh --with-typed
+# ... prints something like:
+#   broker:  http://127.0.0.1:4200/mcp  (key: <40 random chars>, minted fresh this run, fronts typryx as upstream "typryx")
+#   curl -s -X POST http://127.0.0.1:4200/mcp -H "x-fuse-key: <key>" -H "X-Fuse-Mcp-Upstream: typryx" -H "x-fuse-agent-id: agent://demo.local/mcp-broker-demo" ...
+```
+
+The broker keeps its own event file, `~/.stack-up/events/tokenfuse-mcp.ndjson`,
+never the gateway's: two independent process invocations writing one file
+would interleave two writers' lines with nothing in the record to tell them
+apart. **A call needs an `x-fuse-agent-id` header (or an XAA/client-cert
+identity, neither of which this sandbox has) to actually be recorded there**:
+agent-passport SPEC 6.1 forbids a fabricated agent id, so a brokered call that
+names nobody is served exactly the same and its `tool_call` record is
+silently skipped (tokenfuse `crates/gateway/src/mcpbroker.rs`,
+`emit_tool_call`); measured 2026-09-26, the same call without that header
+answered identically and left the file empty. The closing summary's own
+example carries the header for this reason.
+
+**Recorded is still not the same as sealed.** `tool_call` is a type trailryx
+recognizes, unlike typryx's four, but the broker's own event carries no
+`run_id` (it has no run/budget/step state to put one in, the same reason its
+Wardryx context above sends cost, steps, and model empty), and trailryx's
+mapper refuses any line with none. Measured 2026-09-26: a `tool_call` line
+here is refused for `no_run_id`, not `unknown_schema` or `unknown_type` -
+counted, not sealed, the same outcome typryx's journal gets for a different
+reason.
 
 ## What it installs but does not start
 
@@ -545,8 +611,8 @@ Everything that is only stack-up's business stays under `~/.stack-up/`
                plane was skipped)
   logs/        one log file per service
   pids/        recorded PIDs, used by down.sh
-  typryx/      journal + ledger, only with --with-typed (its own path,
-               deliberately not under events/; see "Typed answers" above)
+  typryx/      ledger only, only with --with-typed (its journal is now in
+               events/typryx.ndjson above; see "Typed answers" above)
 ```
 
 Earlier versions kept the binaries in `~/.stack-up/bin`. They are moved on the

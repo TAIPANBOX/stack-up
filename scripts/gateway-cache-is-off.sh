@@ -56,6 +56,19 @@ BIN_VAR="$(grep -oE '^GATEWAY_BIN="[^"]*"' "$LAUNCHER" | head -1)"
 # any mention: anchored to the start of the line, which is where a command
 # sits and an argument does not (the same anchoring
 # gateway-decides-its-upstream.sh uses, for the same reason).
+#
+# `"$GATEWAY_BIN" mcp-broker ...` is excluded (2026-09-26), the same
+# exclusion and the same reason as gateway-decides-its-upstream.sh: the same
+# binary also runs tokenfuse's mcp-broker subcommand under --with-typed, and
+# that process has no semantic response cache to turn off in the first place
+# (TOKENFUSE_CACHE is read only by the gateway's own `serve()`, never by
+# `mcp_broker()`), so it is not a gateway start this invariant is about.
+#
+# The exclusion is anchored to the SUBCOMMAND position, `"$GATEWAY_BIN"`
+# immediately followed by `mcp-broker`, not to the bare substring "mcp-broker"
+# appearing anywhere on the line: a real gateway start whose own trailing
+# comment happened to mention mcp-broker must still be judged, never excused
+# by words after the command it does not change.
 LAUNCH_LINES=""
 LAUNCH_COUNT=0
 while IFS= read -r n; do
@@ -68,7 +81,9 @@ $(
   # another script, and expanding it here would search for this shell's own
   # (empty) variable and quietly match nothing, which is the silent-pass shape
   # gates-have-teeth.sh exists to catch.
-  grep -nE '^[[:space:]]*"\$GATEWAY_BIN"' "$LAUNCHER" | cut -d: -f1
+  grep -nE '^[[:space:]]*"\$GATEWAY_BIN"' "$LAUNCHER" \
+    | grep -vE ':[[:space:]]*"\$GATEWAY_BIN"[[:space:]]+mcp-broker([[:space:]]|$)' \
+    | cut -d: -f1
 )
 EOF
 [ "$LAUNCH_COUNT" -gt 0 ] || fail "up.sh launches \$GATEWAY_BIN nowhere, so this measured nothing"

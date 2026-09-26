@@ -273,6 +273,30 @@ run_case "gateway-cache-is-off: an unrelated var added to the block" pass \
 	'./scripts/gateway-cache-is-off.sh' \
 	"$(py 'edit("up.sh", "TOKENFUSE_CLOUD_KEY=\"devkey\" \\\n", "TOKENFUSE_CLOUD_KEY=\"devkey\" \\\nTOKENFUSE_SPARE=\"1\" \\\n")')"
 
+# THE FIX FOR THE SAME BINARY'S OTHER SUBCOMMAND. `$GATEWAY_BIN mcp-broker`
+# fronts typryx under --with-typed and sets neither TOKENFUSE_UPSTREAM,
+# TOKENFUSE_ALLOW_STUB, nor TOKENFUSE_CACHE, because none of the three applies
+# to it. Both gates must keep excluding it even when a SECOND such start
+# appears elsewhere in up.sh, with an unrelated variable of its own, so the
+# exclusion is proven to be about the subcommand rather than one hardcoded
+# line.
+run_case "gateway-decides-its-upstream: a second mcp-broker start is not mistaken for a gateway start" pass \
+	'./scripts/gateway-decides-its-upstream.sh' \
+	"$(py 'edit("up.sh", "\n  register tokenfuse-mcp-broker \"$!\" TERM\n", "\n  register tokenfuse-mcp-broker \"$!\" TERM\n  TOKENFUSE_MCP_ADDR=\"127.0.0.1:9999\" \\\n    \"$GATEWAY_BIN\" mcp-broker > /dev/null 2>&1 &\n")')"
+
+run_case "gateway-cache-is-off: a second mcp-broker start is not mistaken for a gateway start" pass \
+	'./scripts/gateway-cache-is-off.sh' \
+	"$(py 'edit("up.sh", "\n  register tokenfuse-mcp-broker \"$!\" TERM\n", "\n  register tokenfuse-mcp-broker \"$!\" TERM\n  TOKENFUSE_MCP_ADDR=\"127.0.0.1:9999\" \\\n    \"$GATEWAY_BIN\" mcp-broker > /dev/null 2>&1 &\n")')"
+
+# AND THE FIX MUST NOT BECOME A NEW HOLE. If the exclusion matched on ANYTHING
+# mentioning "mcp-broker" rather than on the subcommand position right after
+# the binary, a real gateway start missing its precondition, with an unrelated
+# trailing comment that happens to say the same word, would be excused by it.
+run_case "gateway-decides-its-upstream: a stray mention of mcp-broker does not excuse a real gateway start" fail \
+	'./scripts/gateway-decides-its-upstream.sh' \
+	"$(py 'edit("up.sh", "TOKENFUSE_ALLOW_STUB=\"1\" \\\n  TOKENFUSE_MODE=\"enforce\" \\\n  TOKENFUSE_CACHE=\"off\" \\\n  TOKENFUSE_EVENTS_PATH=\"$EVENTS_FILE\" \\\n  TOKENFUSE_DATA_DIR=\"$STACK_UP_HOME/traces/gateway\" \\\n  TOKENFUSE_CLOUD_URL=\"http://127.0.0.1:$CLOUD_PORT\" \\\n  TOKENFUSE_CLOUD_KEY=\"devkey\" \\\n    \"$GATEWAY_BIN\" > \"$LOGS_DIR/gateway.log\" 2>&1 &\nfi", "TOKENFUSE_MODE=\"enforce\" \\\n  TOKENFUSE_CACHE=\"off\" \\\n  TOKENFUSE_EVENTS_PATH=\"$EVENTS_FILE\" \\\n  TOKENFUSE_DATA_DIR=\"$STACK_UP_HOME/traces/gateway\" \\\n  TOKENFUSE_CLOUD_URL=\"http://127.0.0.1:$CLOUD_PORT\" \\\n  TOKENFUSE_CLOUD_KEY=\"devkey\" \\\n    \"$GATEWAY_BIN\" > \"$LOGS_DIR/gateway.log\" 2>&1 &  # not mcp-broker\nfi")')" \
+	"neither TOKENFUSE_UPSTREAM nor TOKENFUSE_ALLOW_STUB"
+
 # up.sh reads the domain from the environment and routines.sh from a file.
 # Both are correct and they LOOK different; a gate comparing the raw lines
 # rather than the defaults would fire on a tree that is right.

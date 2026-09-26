@@ -61,6 +61,20 @@ BIN_VAR="$(grep -oE '^GATEWAY_BIN="[^"]*"' "$LAUNCHER" | head -1)"
 # environment prefix and nothing to decide. A gate that fires on a correct line
 # is deleted by whoever is unblocking a release, so the pattern is anchored to
 # the start of the line, which is where a command sits and an argument does not.
+#
+# `"$GATEWAY_BIN" mcp-broker ...` is excluded (2026-09-26): the same binary
+# also runs tokenfuse's mcp-broker subcommand, wired to front typryx under
+# --with-typed, and that process is not the LLM gateway this invariant is
+# about. It never reads TOKENFUSE_UPSTREAM or TOKENFUSE_ALLOW_STUB at all (its
+# own upstream is TOKENFUSE_MCP_UPSTREAM(S), a different variable, checked
+# nowhere here), so counting it as an ungated gateway start would be requiring
+# a precondition that does not apply to what actually started.
+#
+# The exclusion is anchored to the SUBCOMMAND position, `"$GATEWAY_BIN"`
+# immediately followed by `mcp-broker`, not to the bare substring "mcp-broker"
+# appearing anywhere on the line: a real gateway start whose own trailing
+# comment happened to mention mcp-broker must still be judged, never excused
+# by words after the command it does not change.
 LAUNCH_LINES=""
 LAUNCH_COUNT=0
 while IFS= read -r n; do
@@ -73,7 +87,9 @@ $(
   # another script, and expanding it here would search for this shell's own
   # (empty) variable and quietly match nothing, which is the silent-pass shape
   # gates-have-teeth.sh exists to catch.
-  grep -nE '^[[:space:]]*"\$GATEWAY_BIN"' "$LAUNCHER" | cut -d: -f1
+  grep -nE '^[[:space:]]*"\$GATEWAY_BIN"' "$LAUNCHER" \
+    | grep -vE ':[[:space:]]*"\$GATEWAY_BIN"[[:space:]]+mcp-broker([[:space:]]|$)' \
+    | cut -d: -f1
 )
 EOF
 [ "$LAUNCH_COUNT" -gt 0 ] || fail "up.sh launches \$GATEWAY_BIN nowhere, so nothing was measured"

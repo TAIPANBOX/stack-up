@@ -81,15 +81,19 @@
 #                       emits is sealed rather than refused.
 #   --with-typed        also start typryx, a typed-answer service (a choice, a
 #                       score, or a yes/no, each with a probability, instead of
-#                       a sentence a policy cannot threshold). Opt-in add-on:
-#                       without the flag the stack behaves exactly as before.
-#                       Runs with TYPRYX_BACKEND=stub, free and deterministic,
-#                       never a paid or external call; its journal and ledger
-#                       live under their own directory, not the shared event
-#                       bus (its event types are registered in agent-passport
-#                       since 2026-09-25; moving the journal onto the bus is
-#                       a separate choice not made yet). See README.md for how an operator
-#                       switches to a real backend.
+#                       a sentence a policy cannot threshold), and tokenfuse's
+#                       own mcp-broker subcommand fronting it so an agent can
+#                       reach it through the same credential-broker door the
+#                       rest of the estate uses. Opt-in add-on: without the
+#                       flag the stack behaves exactly as before. Runs with
+#                       TYPRYX_BACKEND=stub, free and deterministic, never a
+#                       paid or external call; its journal is on the shared
+#                       event bus now that agent-passport registers its four
+#                       event types (SPEC 6.2), and its ledger stays under its
+#                       own directory. tokenfuse is not modified for this:
+#                       the broker is wired by configuration only. See
+#                       README.md for how an operator switches to a real
+#                       backend.
 #   --force-install     replace binaries another tool installed (default: leave
 #                       them alone and use them as they are)
 #   --workspace <dir>   look here for sibling checkouts before cloning
@@ -177,6 +181,11 @@ SCOPYX_PORT=4300
 VOUCHRYX_PORT=4310
 COSTCREW_PORT=8321
 TYPRYX_PORT=4320
+# tokenfuse's own default for TOKENFUSE_MCP_ADDR (components.json), reused
+# rather than picked here: the broker only ever starts alongside typryx (see
+# the --with-typed block below), and this is the address tokenfuse's own
+# tooling already expects when nothing overrides it.
+BROKER_PORT=4200
 
 # --------------------------------------------------------------------------
 # Options
@@ -1542,14 +1551,22 @@ fi
 # chosen here, and TYPRYX_BACKEND=jev (a paid, external backend) is never
 # chosen by this launcher at all.
 #
-# THE STATE DIRECTORY is its own, not the shared event bus: a journal placed
-# under $EVENTS_DIR would be picked up by trailryx-seal's *.ndjson import.
-# typryx's four event types (typed_answer, typed_unanswered, typed_refused,
-# calibration_drift) are registered in agent-passport SPEC 6.2 since
-# 2026-09-25, so that import would now map them; moving the journal there is
-# a separate choice not made yet. Until then it is kept under
-# $STACK_UP_HOME/typryx, the way costcrew's own data directory sits beside,
-# not inside, the shared bus.
+# THE JOURNAL is on the shared event bus now, `$EVENTS_DIR/typryx.ndjson`,
+# not its own directory. @decided 2026-09-26: typryx's four event types
+# (typed_answer, typed_unanswered, typed_refused, calibration_drift) are
+# registered in agent-passport SPEC 6.2 (agent-passport#67), so the earlier
+# reason for keeping this journal off the bus (an unregistered source
+# trailryx-seal's *.ndjson import would pick up blind) no longer holds. What
+# this does NOT yet mean: typryx emits `agent-event/v1.0`, a schema version
+# trailryx-agentevent does not accept yet (it reads v0.1 through v0.3), so
+# trailryx-seal reads every line here and refuses it for `unknown_schema`
+# before it ever inspects the event type - measured 2026-09-26 on this
+# launcher's own run. The practical outcome is the one ~40 other unmapped or
+# unrecognized event types already get on this bus: counted, not sealed - see
+# the closing summary and README.md's "Typed answers" section. The LEDGER
+# stays under its own directory, `$STACK_UP_HOME/typryx`,
+# the way costcrew's own data directory sits beside, not inside, the shared
+# bus: nothing reads it as an event stream, so there is no bus for it to join.
 if [ "$WITH_TYPED" -eq 1 ]; then
   TYPRYX_REPO="$(locate_repo typryx)" || { warn "could not fetch typryx; skipping."; WITH_TYPED=0; }
 fi
@@ -1575,24 +1592,85 @@ if [ "$WITH_TYPED" -eq 1 ]; then
   # comment above this block for why that matches scopyx rather than
   # vouchryx's revoke key.
   TYPRYX_SECRET="$( set +o pipefail; LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 40 )"
-  TYPRYX_AGENT="agent://local.invalid/typryx-demo"
+  # Minted under the deployment's own trust domain, not a fixed local.invalid:
+  # the journal is on the shared bus now (see the comment above this block),
+  # and an honest agent id there is refused for the correct reason
+  # (unknown_schema, see above) rather than a second, unrelated one (foreign
+  # trust domain) standing in for it.
+  TYPRYX_AGENT="agent://$DEMO_TRUST_DOMAIN/typryx-demo"
   TYPRYX_DIR="$STACK_UP_HOME/typryx"
   mkdir -p "$TYPRYX_DIR"
 
   # `stub` unless the operator exported another backend before calling this
   # script (see the comment above); this launcher never picks one itself.
   TYPRYX_BACKEND="${TYPRYX_BACKEND:-stub}"
-  log "starting typryx on :$TYPRYX_PORT ($TYPRYX_BACKEND backend, journal + ledger under $TYPRYX_DIR)"
+  log "starting typryx on :$TYPRYX_PORT ($TYPRYX_BACKEND backend, journal on the shared bus, ledger under $TYPRYX_DIR)"
+  # TYPRYX_ACCEPT_KEY_IN_META: off in typryx by default. On here because the
+  # broker started right below forwards a brokered call with only a
+  # content-type header - no X-Typryx-Key, no agent identity of its own
+  # (tokenfuse crates/gateway/src/mcpbroker.rs) - so this is what lets a
+  # tools/call carry its credential at params._meta["typryx/key"] instead,
+  # resolved from the broker's own vault before the request ever reaches
+  # typryx (typryx#6).
   TYPRYX_ADDR="127.0.0.1:$TYPRYX_PORT" \
   TYPRYX_KEYS="$TYPRYX_SECRET=$TYPRYX_AGENT" \
   TYPRYX_BACKEND="$TYPRYX_BACKEND" \
   TYPRYX_TEMPLATES="$TYPRYX_REPO/examples/templates" \
-  TYPRYX_EVENTS="$TYPRYX_DIR/events.ndjson" \
+  TYPRYX_EVENTS="$EVENTS_DIR/typryx.ndjson" \
   TYPRYX_LEDGER_DIR="$TYPRYX_DIR/ledger" \
+  TYPRYX_ACCEPT_KEY_IN_META="1" \
     "$TYPRYX_BIN" > "$LOGS_DIR/typryx.log" 2>&1 &
   register typryx "$!" TERM
   wait_health typryx "$TYPRYX_PORT" "$!" "/healthz" || \
     warn "typryx did not come up; the rest of the stack is unaffected."
+fi
+
+# --------------------------------------------------------------------------
+# tokenfuse's MCP credential broker (also --with-typed): fronts typryx.
+#
+# WHY THIS IS TOKENFUSE'S OWN CODE, UNCHANGED. `tokenfuse mcp-broker` is a
+# subcommand of the exact binary this launcher already built for the money
+# plane above ($GATEWAY_BIN); nothing in tokenfuse's source is touched for
+# this. Wiring it to typryx is a matter of its own documented environment
+# contract (tokenfuse docs/12-mcp-credential-broker.md,
+# docs/23-mcp-broker-v2.md): a named upstream, a client key, and a scoped
+# secret an agent's call can carry without ever holding the real value.
+#
+# WHY THE CREDENTIAL TRAVELS AS A SECRET HANDLE, NOT A HEADER. A brokered
+# `tools/call` reaches typryx with only a content-type header: no
+# X-Typryx-Key, no agent identity the broker itself asserts. So the
+# credential is the thing being brokered: TOKENFUSE_MCP_SECRETS holds
+# typryx's own per-run key, TOKENFUSE_MCP_SECRET_SCOPES limits it to typryx's
+# three tools, and a caller's request carries only the handle
+# `{{secret:typryx_key}}` at `params._meta["typryx/key"]`, resolved by the
+# broker before the request leaves this process. TYPRYX_ACCEPT_KEY_IN_META
+# above is the other half: what lets typryx read a credential from that
+# `_meta` place at all.
+#
+# THE CLIENT KEY (TOKENFUSE_MCP_KEYS) is minted fresh per run, the same
+# posture as typryx's and scopyx's own just above: a loopback bind does not
+# require one, and this launcher mints one anyway so the curl example this
+# run prints shows the real shape a real deployment would need, not a
+# shortcut that only works here.
+#
+# ITS OWN EVENT FILE. TOKENFUSE_EVENTS_PATH here is the broker's, never the
+# gateway's ($EVENTS_FILE, tokenfuse.ndjson): two independent process
+# invocations writing one file would interleave two writers' lines with
+# nothing in the record to tell them apart.
+if [ "$WITH_TYPED" -eq 1 ]; then
+  BROKER_SECRET="$( set +o pipefail; LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 40 )"
+  log "starting tokenfuse-mcp-broker on :$BROKER_PORT (fronting typryx on :$TYPRYX_PORT)"
+  TOKENFUSE_MCP_ADDR="127.0.0.1:$BROKER_PORT" \
+  TOKENFUSE_MCP_UPSTREAM="http://127.0.0.1:$TYPRYX_PORT/mcp" \
+  TOKENFUSE_MCP_UPSTREAMS="typryx=http://127.0.0.1:$TYPRYX_PORT/mcp" \
+  TOKENFUSE_MCP_KEYS="$BROKER_SECRET:stack-up-demo" \
+  TOKENFUSE_MCP_SECRETS="typryx_key=$TYPRYX_SECRET" \
+  TOKENFUSE_MCP_SECRET_SCOPES="typryx_key=tools:ask|ask_freeform|list_questions" \
+  TOKENFUSE_EVENTS_PATH="$EVENTS_DIR/tokenfuse-mcp.ndjson" \
+    "$GATEWAY_BIN" mcp-broker > "$LOGS_DIR/tokenfuse-mcp-broker.log" 2>&1 &
+  register tokenfuse-mcp-broker "$!" TERM
+  wait_health tokenfuse-mcp-broker "$BROKER_PORT" "$!" "/healthz" || \
+    warn "tokenfuse-mcp-broker did not come up; typryx is still reachable directly on :$TYPRYX_PORT."
 fi
 
 # --------------------------------------------------------------------------
@@ -1914,7 +1992,19 @@ if [ "$WITH_TYPED" -eq 1 ]; then
   log "typryx:  http://127.0.0.1:$TYPRYX_PORT  (key: $TYPRYX_SECRET, $TYPRYX_BACKEND backend, minted fresh this run)"
   printf '  curl -s -X POST http://127.0.0.1:%s/v1/ask -H "X-Typryx-Key: %s" -H "Content-Type: application/json" -d '"'"'{"template":"eval.outcome_met","state":{"task":"2+2","final_answer":"4"}}'"'"'\n' \
     "$TYPRYX_PORT" "$TYPRYX_SECRET"
-  log "         journal: $TYPRYX_DIR/events.ndjson   ledger: $TYPRYX_DIR/ledger"
+  log "         journal: $EVENTS_DIR/typryx.ndjson (on the shared bus; trailryx-seal reads it and refuses it for unknown_schema, see below)   ledger: $TYPRYX_DIR/ledger"
+  log "broker:  http://127.0.0.1:$BROKER_PORT/mcp  (key: $BROKER_SECRET, minted fresh this run, fronts typryx as upstream \"typryx\")"
+  # x-fuse-agent-id, in the example itself, is not decoration: the broker's
+  # own tool_call record needs an agent id from SOMEWHERE (this header, or an
+  # XAA/client-cert identity this sandbox has neither of), and agent-passport
+  # SPEC 6.1 forbids a fabricated one, so tokenfuse counts and silently skips
+  # writing the record for a call that names nobody (tokenfuse
+  # crates/gateway/src/mcpbroker.rs, emit_tool_call). Measured 2026-09-26 on
+  # this launcher: the same call with the header omitted served the answer
+  # identically and left $EVENTS_DIR/tokenfuse-mcp.ndjson empty.
+  printf '  curl -s -X POST http://127.0.0.1:%s/mcp -H "x-fuse-key: %s" -H "X-Fuse-Mcp-Upstream: typryx" -H "x-fuse-agent-id: agent://%s/mcp-broker-demo" -H "Content-Type: application/json" -d '"'"'{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ask","arguments":{"template":"eval.outcome_met","state":{"task":"2+2","final_answer":"4"}},"_meta":{"typryx/key":"{{secret:typryx_key}}"}}}'"'"'\n' \
+    "$BROKER_PORT" "$BROKER_SECRET" "$DEMO_TRUST_DOMAIN"
+  log "         its own events: $EVENTS_DIR/tokenfuse-mcp.ndjson (needs x-fuse-agent-id above or the call is served but the record is skipped, unattributed)"
 fi
 if [ "$WANT_RECORDS" -eq 1 ]; then
   echo

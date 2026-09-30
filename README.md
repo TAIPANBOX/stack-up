@@ -213,6 +213,12 @@ latency is the median per question.
 | `own-model`, qwen2.5:7b, no tuning, on an 8-vCPU CPU-only VM | 70.0% | 0.273 | 2130 ms |
 | no typed answer (a constant default answer) | 25.1% | not applicable | not applicable |
 
+A model slower than typryx's own default of 2 seconds per question needs
+`TYPRYX_TIMEOUT_MS` exported before `./up.sh`; the launcher passes it through
+unchanged. Measured 2026-09-30 against a local Ollama serving qwen2.5:7b: with
+the default, one ask came back unanswered with reason `timeout`; with
+`TYPRYX_TIMEOUT_MS=60000` the same ask was answered in 1.8 seconds.
+
 Read the middle row as a starting point, not a ceiling: it is a general
 7-billion-parameter model nobody has tuned, on a machine with no GPU. It
 already beats a constant answer by a wide margin, and its probabilities are

@@ -292,6 +292,15 @@ run_case "typed-mode: a stale TYPRYX_JEV_URL can redirect the key" fail \
 	"$(py 'edit("up.sh", "TYPRYX_ENV=(-u TYPRYX_JEV_URL -u TYPRYX_JEV_MODEL\n", "TYPRYX_ENV=(-u TYPRYX_JEV_MODEL\n")')" \
 	"last plan does not contain: env: -u TYPRYX_JEV_URL"
 
+# Found running typryx through the array, not by the plan: `env` stops reading
+# options at the first NAME=VALUE, so an `-u` placed after one is executed as a
+# program. The plan looked right and the launch would have died.
+run_case "typed-mode: an -u placed after an assignment in the env array" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "TYPRYX_ENV=(-u TYPRYX_JEV_KEY_FILE -u TYPRYX_JEV_URL -u TYPRYX_JEV_MODEL -u TYPRYX_OPENAI_KEY_FILE\n", "TYPRYX_ENV=(-u TYPRYX_JEV_KEY_FILE -u TYPRYX_JEV_URL -u TYPRYX_JEV_MODEL\n")
+edit("up.sh", "\"TYPRYX_OPENAI_MODEL=$TYPED_MODEL\")\n      fi", "\"TYPRYX_OPENAI_MODEL=$TYPED_MODEL\" -u TYPRYX_OPENAI_KEY_FILE)\n      fi")')" \
+	"an -u comes after an assignment"
+
 echo
 echo "=== and what they must NOT catch ==="
 

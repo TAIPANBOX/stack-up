@@ -356,13 +356,18 @@ resolve_typed_mode() {
       WITH_TYPED=1
       TYPED_BACKEND=openai-logprobs
       TYPED_LEAVES="questions go only to the model server you named, $TYPED_MODEL_URL; nothing goes to TypeSafe or anyone else"
-      TYPRYX_ENV=(-u TYPRYX_JEV_KEY_FILE -u TYPRYX_JEV_URL -u TYPRYX_JEV_MODEL
-        "TYPRYX_BACKEND=openai-logprobs" "TYPRYX_OPENAI_URL=$TYPED_MODEL_URL" "TYPRYX_OPENAI_MODEL=$TYPED_MODEL")
+      # Every `-u` comes BEFORE the first NAME=VALUE: `env` stops reading its
+      # own options at the first assignment and runs whatever follows as the
+      # command, so a later `-u` would be executed as a program ("env: -u: No
+      # such file or directory", found running typryx through this array).
       if [ -n "$TYPED_KEY_FILE" ]; then
         typed_key_file_ok --typed-key-file
-        TYPRYX_ENV+=("TYPRYX_OPENAI_KEY_FILE=$TYPED_KEY_FILE")
+        TYPRYX_ENV=(-u TYPRYX_JEV_KEY_FILE -u TYPRYX_JEV_URL -u TYPRYX_JEV_MODEL
+          "TYPRYX_BACKEND=openai-logprobs" "TYPRYX_OPENAI_URL=$TYPED_MODEL_URL" "TYPRYX_OPENAI_MODEL=$TYPED_MODEL"
+          "TYPRYX_OPENAI_KEY_FILE=$TYPED_KEY_FILE")
       else
-        TYPRYX_ENV+=(-u TYPRYX_OPENAI_KEY_FILE)
+        TYPRYX_ENV=(-u TYPRYX_JEV_KEY_FILE -u TYPRYX_JEV_URL -u TYPRYX_JEV_MODEL -u TYPRYX_OPENAI_KEY_FILE
+          "TYPRYX_BACKEND=openai-logprobs" "TYPRYX_OPENAI_URL=$TYPED_MODEL_URL" "TYPRYX_OPENAI_MODEL=$TYPED_MODEL")
       fi
       ;;
     "")

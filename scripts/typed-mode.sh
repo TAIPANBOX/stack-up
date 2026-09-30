@@ -92,6 +92,16 @@ expect() {
 has() { n=$((n + 1)); printf '%s' "$out" | grep -qF -- "$1" || bad "last plan does not contain: $1"; }
 lacks() { n=$((n + 1)); ! printf '%s' "$out" | grep -qF -- "$1" || bad "last plan contains: $1"; }
 
+# Every plan's env lines must have all `-u` before the first NAME=VALUE: `env`
+# stops reading options at the first assignment and would run a later `-u` as
+# the command. Found by running typryx through the array; the plan alone
+# looked right.
+env_ordered() {
+  n=$((n + 1))
+  printf '%s\n' "$out" | awk '/^typed: env: -u /{ if (seen) bad=1; next } /^typed: env: /{ seen=1 } END { exit bad }' \
+    || bad "an -u comes after an assignment in the env array, so env would run it as a command"
+}
+
 # 1. default off, and --with-typed alone is exactly today's stub.
 expect "no flags"               0 "typryx is not started" -- --typed-plan
 expect "--typed-mode off"       0 "typryx is not started" -- --typed-mode off --typed-plan
@@ -100,6 +110,7 @@ has "env: TYPRYX_BACKEND=stub"
 lacks "env: -u"
 lacks "jev"
 lacks "openai"
+env_ordered
 
 # 2. jev
 expect "jev, no key file"       2 "--typed-key-file"      -- --typed-mode jev --typed-plan
@@ -116,6 +127,7 @@ has "TypeSafe"
 has "env: -u TYPRYX_JEV_URL"
 has "env: -u TYPRYX_JEV_MODEL"
 lacks "openai-logprobs"
+env_ordered
 
 # 3. own-model
 expect "own-model, no URL"      2 "--typed-model-url"     -- --typed-mode own-model --typed-model m --typed-plan
@@ -132,9 +144,11 @@ has "env: TYPRYX_OPENAI_MODEL=qwen2.5:7b"
 has "env: -u TYPRYX_OPENAI_KEY_FILE"
 lacks "TYPRYX_JEV_KEY_FILE="
 has "env: -u TYPRYX_JEV_KEY_FILE"
+env_ordered
 expect "own-model, with key"    0 "backend: openai-logprobs" -- --typed-mode own-model --typed-model-url https://gpu.internal:8000/v1/ --typed-model m --typed-key-file "$work/key" --typed-plan
 has "env: TYPRYX_OPENAI_KEY_FILE=$work/key"
 lacks "env: -u TYPRYX_OPENAI_KEY_FILE"
+env_ordered
 
 # 4. contradictions are refused, never silently ignored
 expect "off with --with-typed"  2 "contradict"            -- --with-typed --typed-mode off --typed-plan

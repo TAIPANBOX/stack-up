@@ -219,8 +219,8 @@ building here and the thing that most often gets skipped.
     `TYPRYX_JEV_URL` cannot redirect the key. Not wired yet:
     `TYPRYX_TRAINING_DIR` (typryx's opt-in local training log); it is not on
     typryx's main branch, which is what this launcher builds.
-    *(gate: `scripts/typed-mode.sh`, 43 checks through `--typed-plan`, plus a
-    static check that up.sh never reads the key file; 10 cases in
+    *(gate: `scripts/typed-mode.sh`, 47 checks through `--typed-plan`, plus a
+    static check that up.sh never reads the key file; 11 cases in
     `gates-have-teeth.sh`. What it does not cover: typryx actually running in
     each mode, and the key staying out of the running process's arguments and
     log. That half was shown by hand in the pull request that added this

@@ -222,7 +222,9 @@ fi
 # 8b. the two functions the launch itself runs for the training log, cut out of
 # up.sh by name and run here. A copy would only prove the copy.
 fn() { sed -n "/^$1() {/,/^}/p" "$LAUNCHER"; }
-mode_of() { stat -f %Lp "$1" 2>/dev/null || stat -c %a "$1" 2>/dev/null; }
+# GNU first: on Linux `stat -f` is the FILESYSTEM report and exits 0, so trying the
+# BSD form first read a disk summary as a mode (found by CI on ubuntu-latest).
+mode_of() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1" 2>/dev/null; }
 
 n=$((n + 1))
 mk="$(fn typed_make_training_dir)"

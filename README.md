@@ -40,7 +40,7 @@ Everything binds to `127.0.0.1` only.
 | scopyx | 4300 | Governed web egress. Agents fetch **through** it, and wardryx decides every destination before anything leaves. `./up.sh` makes one call through it, to the cloud metadata address, which is refused on its address before a packet leaves the machine: read the refusal in `~/.stack-up/events/scopyx.ndjson` and the alert it raised in `~/.stack-up/mail.txt`. `--no-egress` skips it. |
 | vouchryx | 4310 | The delegation-token service, **only with `--with-delegation`**. Issues RFC 8693 tokens bound to a key the caller proved it holds, and the revocation list the gateway polls. Without the flag the gateway's delegation door stays shut, and a chain reaching the policy plane is one the CALLER asserted. |
 | costcrew | 8321 | The FinOps console, **only with `--with-finops`**. Cloud and AI spend, an agent crew that triages it, and a person who reviews what they wrote. A guest producer: it writes the shared bus and calls nobody, and it enforces nothing. |
-| typryx | 4320 | Typed answers with a probability, **only with `--with-typed`**. A choice, a score, or a yes/no, each with a probability, instead of a sentence a policy cannot threshold. Runs with the free, deterministic `stub` backend; without the flag the stack behaves exactly as before. |
+| typryx | 4320 | Typed answers with a probability, **only with `--with-typed`**. A choice, a score, or a yes/no, each with a probability, instead of a sentence a policy cannot threshold. Runs with the free, deterministic `stub` backend unless you choose a data mode (`--typed-mode`, see "Typed answers: choose where your data goes"); without the flag the stack behaves exactly as before. |
 | tokenfuse-mcp-broker | 4200 | tokenfuse's own MCP credential broker, **also with `--with-typed`**, fronting typryx: an agent authenticates to this one door instead of typryx's own. tokenfuse's code is unchanged; this is configuration only. |
 
 The money plane (gateway + cloud + dashboard) is mandatory; the rest degrade
@@ -159,14 +159,88 @@ yes/no or which-one question into a `choice`, `score`, or `noul` answer, each
 with a probability, instead of a sentence a policy cannot threshold. Absent
 the flag, the stack behaves exactly as it did before typryx existed.
 
-It runs with `TYPRYX_BACKEND=stub`: free, deterministic, and makes no
-outbound call, so this launcher never chooses a paid or external backend on
-its own. To point a run at a real model instead, export
-`TYPRYX_BACKEND=openai-logprobs` together with `TYPRYX_OPENAI_URL` and
-`TYPRYX_OPENAI_MODEL` (optionally `TYPRYX_OPENAI_KEY_FILE`, a path to a bearer
-key, never the key itself) before calling `./up.sh --with-typed`; see
-typryx's own README for the full backend contract. `TYPRYX_BACKEND=jev`, a
-paid backend, is never set by this launcher.
+On its own it runs with `TYPRYX_BACKEND=stub`: free, deterministic, and makes
+no outbound call, so this launcher never chooses a paid or external backend
+for anyone. To use a real backend, choose a data mode with `--typed-mode`; the
+next section says what each one sends where. (An operator who exports
+`TYPRYX_BACKEND` and its variables by hand before `./up.sh --with-typed` still
+gets exactly that, as before; the explicit flags are the checked way.)
+
+### Typed answers: choose where your data goes
+
+typryx needs something to ask. There are three choices, and this launcher never
+makes one for you: with no `--typed-mode` nothing starts, and `--with-typed`
+alone is the stub above.
+
+| Mode | How | What leaves the machine |
+|---|---|---|
+| `jev` | `./up.sh --typed-mode jev --typed-key-file ~/keys/jev.key` | The named fields of each question, and only those (typryx's question template is the allowlist), go to TypeSafe AI's hosted typed-decision API. Nothing else does. |
+| `own-model` | `./up.sh --typed-mode own-model --typed-model-url http://127.0.0.1:11434/v1 --typed-model qwen2.5:7b` | Nothing leaves your hardware, if the server you name is yours. Questions go only to that one URL, which must be an OpenAI-compatible server (Ollama, vLLM, and similar) and end in `/v1`. `--typed-key-file` is optional here, for a server that wants a bearer key. |
+| `off` | `./up.sh --typed-mode off` (or no flag at all) | typryx is not started. |
+
+The key is a **file**, never a value: `--typed-key-file` takes a path, and
+there is no environment variable or argument that carries the key itself. This
+launcher checks that the file exists and is not blank, then hands typryx the
+path; typryx reads the file. The launcher never reads the key's bytes, and the
+only thing it ever prints is the path. A bad choice (a missing or blank key
+file, a model URL that does not end in `/v1`, `--typed-mode off` together with
+`--with-typed`, a key file with no mode) exits with status 2 while the
+arguments are still being read, before anything is built or started. Under a
+chosen mode, typryx's other backend variables are removed from its environment,
+so a stale `TYPRYX_JEV_URL` left in your shell cannot redirect the key.
+
+To see the resolved choice without starting anything (it is also the quickest
+way to check what would leave the machine):
+
+```sh
+./up.sh --typed-mode own-model --typed-model-url http://127.0.0.1:11434/v1 \
+        --typed-model qwen2.5:7b --typed-plan
+# typed: mode: own-model
+# typed: backend: openai-logprobs
+# typed: leaves this machine: questions go only to the model server you named, ...
+# typed: env: TYPRYX_OPENAI_URL=http://127.0.0.1:11434/v1
+```
+
+**What the two real modes measured.** One run each on 2026-09-30, on a frozen
+434-question test. Accuracy is how often
+the top answer was right; ECE (expected calibration error, lower is better) is
+how far the stated probabilities sit from how often they turned out true;
+latency is the median per question.
+
+| | Accuracy | ECE | Median latency |
+|---|---|---|---|
+| `jev` (hosted) | 87.1% | 0.042 | 229 ms |
+| `own-model`, qwen2.5:7b, no tuning, on an 8-vCPU CPU-only VM | 70.0% | 0.273 | 2130 ms |
+| no typed answer (a constant default answer) | 25.1% | not applicable | not applicable |
+
+A model slower than typryx's own default of 2 seconds per question needs
+`TYPRYX_TIMEOUT_MS` exported before `./up.sh`; the launcher passes it through
+unchanged. Measured 2026-09-30 against a local Ollama serving qwen2.5:7b: with
+the default, one ask came back unanswered with reason `timeout`; with
+`TYPRYX_TIMEOUT_MS=60000` the same ask was answered in 1.8 seconds.
+
+Read the middle row as a starting point, not a ceiling: it is a general
+7-billion-parameter model nobody has tuned, on a machine with no GPU. It
+already beats a constant answer by a wide margin, and its probabilities are
+the weak part (an ECE of 0.273 means its stated confidence sits far from how often
+it is right). These are one test set and one run each; your questions
+will score differently.
+
+**Your own model, on your own data.** We do not fine-tune or ship models for
+customers. If you choose `own-model`, you can fine-tune and calibrate that
+model on your own data, and typryx gives you what you need to do it. Today
+that is the ledger this launcher already keeps under
+`~/.stack-up/typryx/ledger` (every answer, and the outcome you later record
+against it) and `typryx calibration`, which scores the ledger (Brier score and
+ECE) so a tuned model's probabilities can be checked against what actually
+happened. An opt-in local training log, off by default and enabled through
+`TYPRYX_TRAINING_DIR`, is **planned** in typryx and is not wired into this
+launcher yet: it is not on typryx's main branch yet, which is what this launcher builds.
+Train on outcomes you record yourself, not on another model's answers: a
+hosted provider's terms may forbid using its output to train a model.
+`@decided 2026-09-30`: the three modes, the choice being the operator's, and
+training being the customer's own work on their own data are settled; the
+planned log is a plan, not a shipped feature.
 
 The door key is generated fresh on every run, held only in this process's
 environment, and never written to a file, the same posture as scopyx's own
@@ -464,6 +538,12 @@ keeps. Only a total refusal stops the run.
 --no-tools         skip the four installed-not-started tools
 --force-install    replace binaries another tool installed
 --workspace <dir>  look here for sibling checkouts before cloning
+--with-typed       also start typryx (typed answers; stub backend unless a mode is chosen)
+--typed-mode <m>   jev | own-model | off: where typed-answer data goes (see "Typed answers: choose where your data goes")
+--typed-key-file <path>     a file holding the key (required for jev, optional for own-model)
+--typed-model-url <url>     own-model: the server's base URL, ending in /v1
+--typed-model <name>        own-model: the model name the server knows
+--typed-plan       print the resolved typed-answers choice and exit, starting nothing
 -h, --help         show help
 ```
 

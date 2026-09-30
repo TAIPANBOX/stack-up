@@ -252,6 +252,55 @@ s = s.replace(anchor, block + anchor, 1)
 open("routines.sh", "w").write(s)')" \
 	"runs AFTER the plane was already told to read"
 
+# invariant 10: the typed-answers data mode. Every one of these is an edit
+# somebody makes with a reason: to let a blank file through, to loosen the URL
+# check so a proxy path works, to make typed answers the default, to print the
+# key once while debugging, or to drop the lines that keep a stale exported
+# variable from redirecting the key.
+run_case "typed-mode: a blank key file is accepted" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "grep -q '"'"'[^[:space:]]'"'"' \"$TYPED_KEY_FILE\"", "true")')" \
+	"jev, empty file: exit 0, wanted 2"
+
+run_case "typed-mode: own-model takes a URL that does not end in /v1" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "(/[^?#[:space:]]*)?/v1/?$ ]]", ".*$ ]]")')" \
+	"own-model, URL not /v1: exit 0, wanted 2"
+
+run_case "typed-mode: --with-typed alone stops being the stub" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "TYPED_BACKEND=\"${TYPRYX_BACKEND:-stub}\"", "TYPED_BACKEND=\"${TYPRYX_BACKEND:-jev}\"")')" \
+	"last plan does not contain: env: TYPRYX_BACKEND=stub"
+
+run_case "typed-mode: typed answers become the default" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "WITH_TYPED=0\n# The typed-answers", "WITH_TYPED=1\n# The typed-answers")')" \
+	"no flags: output does not say: typryx is not started"
+
+run_case "typed-mode: the launch log prints the key file's content" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "log \"typryx data: $TYPED_LEAVES\"", "log \"typryx data: $TYPED_LEAVES $(cat \"$TYPED_KEY_FILE\" 2>/dev/null)\"")')" \
+	"reads the key file instead of only naming it"
+
+run_case "typed-mode: a plan writes into the state directory" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "resolve_typed_mode\nif [ \"$TYPED_PLAN\" -eq 1 ]", "resolve_typed_mode\nmkdir -p \"$STACK_UP_HOME\"\nif [ \"$TYPED_PLAN\" -eq 1 ]")')" \
+	"a refusal or a plan created"
+
+run_case "typed-mode: a stale TYPRYX_JEV_URL can redirect the key" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "TYPRYX_ENV=(-u TYPRYX_JEV_URL -u TYPRYX_JEV_MODEL\n", "TYPRYX_ENV=(-u TYPRYX_JEV_MODEL\n")')" \
+	"last plan does not contain: env: -u TYPRYX_JEV_URL"
+
+# Found running typryx through the array, not by the plan: `env` stops reading
+# options at the first NAME=VALUE, so an `-u` placed after one is executed as a
+# program. The plan looked right and the launch would have died.
+run_case "typed-mode: an -u placed after an assignment in the env array" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "TYPRYX_ENV=(-u TYPRYX_JEV_KEY_FILE -u TYPRYX_JEV_URL -u TYPRYX_JEV_MODEL -u TYPRYX_OPENAI_KEY_FILE\n", "TYPRYX_ENV=(-u TYPRYX_JEV_KEY_FILE -u TYPRYX_JEV_URL -u TYPRYX_JEV_MODEL\n")
+edit("up.sh", "\"TYPRYX_OPENAI_MODEL=$TYPED_MODEL\")\n      fi", "\"TYPRYX_OPENAI_MODEL=$TYPED_MODEL\" -u TYPRYX_OPENAI_KEY_FILE)\n      fi")')" \
+	"an -u comes after an assignment"
+
 echo
 echo "=== and what they must NOT catch ==="
 
@@ -304,6 +353,12 @@ run_case "one-trust-domain: two spellings of the same default" pass \
 	'./scripts/one-trust-domain.sh' \
 	"$(py 'edit("routines.sh", "DEMO_TRUST_DOMAIN=\"demo.local\"", "DEMO_TRUST_DOMAIN=\"demo.local\"   # read from the file below")')"
 
+# The key file's PATH is fine to name: the plan and the launch log do, on
+# purpose, so an operator can see which file was used. Only its bytes are not.
+run_case "typed-mode: a log line names the key file's path, not its content" pass \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "log \"typryx data: $TYPED_LEAVES\"", "log \"typryx data: $TYPED_LEAVES\"\n  log \"typryx key file: ${TYPED_KEY_FILE:-none}\"")')"
+
 echo
 echo "=== and the one this estate learned the hard way ==="
 echo "    a gate whose subject is gone must SAY so, not report OK on nothing"
@@ -338,6 +393,22 @@ for f in ("up.sh", "down.sh", "routines.sh"):
         subprocess.run(["git", "mv", f, f[:-3] + ".bash"], check=True)
         n += 1
 assert n, "no launcher files in this repo"')" \
+	"measured nothing"
+
+run_case "typed-mode: no up.sh left to drive" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 'import subprocess, os
+assert os.path.exists("up.sh"), "expected up.sh"
+subprocess.run(["git", "mv", "up.sh", "up.bash"], check=True)')" \
+	"measured nothing"
+
+# The static half reads the launcher for the key file's variable. Rename it
+# and the plan still works, so only that half notices it has nothing to read.
+run_case "typed-mode: the key file variable is renamed away" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 's = open("up.sh").read()
+assert "TYPED_KEY_FILE" in s, "variable not present"
+open("up.sh", "w").write(s.replace("TYPED_KEY_FILE", "TYPED_KEYF"))')" \
 	"measured nothing"
 
 echo

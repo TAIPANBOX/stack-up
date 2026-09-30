@@ -39,6 +39,9 @@ jobs:
       - name: the revocation key is never logged
         run: ./scripts/revoke-key-not-printed.sh
 
+      - name: the typed-answers data mode is chosen, refused early, and the key file is never read
+        run: ./scripts/typed-mode.sh
+
       # Last, because it mutates tracked files and restores them. It needs a
       # clean tree and says so plainly, so it also reports any earlier step
       # that starts writing into the checkout.

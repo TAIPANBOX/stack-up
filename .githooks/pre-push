@@ -37,6 +37,7 @@ step "one trust domain" "./scripts/one-trust-domain.sh"
 step "gateway decides its upstream" "./scripts/gateway-decides-its-upstream.sh"
 step "gateway semantic cache off" "./scripts/gateway-cache-is-off.sh"
 step "revocation key not logged" "./scripts/revoke-key-not-printed.sh"
+step "typed-answers data mode" "./scripts/typed-mode.sh"
 
 echo
 if [ "$fail" -ne 0 ]; then

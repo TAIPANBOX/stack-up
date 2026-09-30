@@ -29,6 +29,14 @@
 #   6. A refusal and a plan leave the state directory untouched.
 #   7. Statically: up.sh never reads the key file's bytes. The only touch is a
 #      `grep -q` for "not blank", which prints nothing.
+#   8. The local training log (`--typed-training`, typryx's TYPRYX_TRAINING_DIR):
+#      off by default and absent from every default plan; asking for it without
+#      typryx running is refused, not ignored; on, the plan prints the private
+#      directory, the ledger beside it and the export command; the directory
+#      function makes it 0700 even where it already existed looser; and the
+#      check that the typryx binary has a training log at all answers both ways.
+#      The last two run the launcher's OWN functions, cut out of up.sh, not a
+#      copy of them.
 #
 # WHAT IT DELIBERATELY DOES NOT DO
 #
@@ -158,6 +166,33 @@ expect "unknown mode"           2 "jev, own-model or off" -- --typed-mode cloud 
 
 # 5 was folded into the has/lacks lines and expect()'s key-content check.
 
+# 8. the local training log: off unless asked for, refused when it has nothing
+# to attach to, and private once it exists.
+expect "training off: plan with --with-typed"  0 "backend: stub" -- --with-typed --typed-plan
+lacks "TYPRYX_TRAINING_DIR"
+lacks "training"
+expect "training off: own-model plan"          0 "backend: openai-logprobs" -- --typed-mode own-model --typed-model-url http://127.0.0.1:11434/v1 --typed-model m --typed-plan
+lacks "TYPRYX_TRAINING_DIR"
+lacks "training"
+expect "training, no typryx to attach to"      2 "--with-typed" -- --typed-training --typed-plan
+expect "training under --typed-mode off"       2 "--typed-training" -- --typed-mode off --typed-training --typed-plan
+expect "training, stub"                        0 "training log: on" -- --with-typed --typed-training --typed-plan
+has "env: TYPRYX_TRAINING_DIR=$STACK_UP_HOME/typryx/training"
+has "training dir: $STACK_UP_HOME/typryx/training"
+has "ledger dir: $STACK_UP_HOME/typryx/ledger"
+has "typryx export --training --training-dir $STACK_UP_HOME/typryx/training --ledger $STACK_UP_HOME/typryx/ledger"
+has "env: TYPRYX_BACKEND=stub"
+env_ordered
+expect "training, own-model"                   0 "training log: on" -- --typed-mode own-model --typed-model-url http://127.0.0.1:11434/v1 --typed-model qwen2.5:7b --typed-training --typed-plan
+has "env: TYPRYX_TRAINING_DIR=$STACK_UP_HOME/typryx/training"
+has "env: TYPRYX_OPENAI_URL=http://127.0.0.1:11434/v1"
+has "env: -u TYPRYX_JEV_KEY_FILE"
+env_ordered
+expect "training, jev"                         0 "training log: on" -- --typed-mode jev --typed-key-file "$work/key" --typed-training --typed-plan
+has "env: TYPRYX_TRAINING_DIR=$STACK_UP_HOME/typryx/training"
+has "no backend answer"
+env_ordered
+
 # 6. refusals and plans never touch the state directory
 n=$((n + 1))
 if [ -e "$STACK_UP_HOME" ]; then
@@ -184,8 +219,54 @@ else
   fi
 fi
 
+# 8b. the two functions the launch itself runs for the training log, cut out of
+# up.sh by name and run here. A copy would only prove the copy.
+fn() { sed -n "/^$1() {/,/^}/p" "$LAUNCHER"; }
+# GNU first: on Linux `stat -f` is the FILESYSTEM report and exits 0, so trying the
+# BSD form first read a disk summary as a mode (found by CI on ubuntu-latest).
+mode_of() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1" 2>/dev/null; }
+
+n=$((n + 1))
+mk="$(fn typed_make_training_dir)"
+if [ -z "$mk" ]; then
+  echo "FAIL: $LAUNCHER has no typed_make_training_dir, so the directory's privacy measured nothing."
+  fails=$((fails + 1))
+else
+  eval "$mk"
+  fresh="$work/fresh/typryx/training"
+  ( typed_make_training_dir "$fresh" ) >/dev/null 2>&1
+  if [ ! -d "$fresh" ]; then
+    fails=$((fails + 1)); echo "FAIL: typed_make_training_dir did not create $fresh"
+  elif [ "$(mode_of "$fresh")" != 700 ]; then
+    fails=$((fails + 1)); echo "FAIL: a fresh training directory is $(mode_of "$fresh"), wanted 700"
+  fi
+  loose="$work/loose"
+  mkdir -p "$loose" && chmod 755 "$loose"
+  ( typed_make_training_dir "$loose" ) >/dev/null 2>&1
+  n=$((n + 1))
+  [ "$(mode_of "$loose")" = 700 ] || { fails=$((fails + 1)); echo "FAIL: a training directory that already existed at 755 is $(mode_of "$loose") afterwards, wanted 700"; }
+fi
+
+n=$((n + 1))
+sup="$(fn typed_bin_has_training)"
+if [ -z "$sup" ]; then
+  echo "FAIL: $LAUNCHER has no typed_bin_has_training, so whether typryx can log measured nothing."
+  fails=$((fails + 1))
+else
+  eval "$sup"
+  printf '#!/bin/sh\necho "  -training-dir string"\nexit 2\n' > "$work/typryx-new"
+  printf '#!/bin/sh\necho "typryx: unknown command export"\nexit 2\n' > "$work/typryx-old"
+  chmod +x "$work/typryx-new" "$work/typryx-old"
+  n=$((n + 1))
+  typed_bin_has_training "$work/typryx-new" || { fails=$((fails + 1)); echo "FAIL: a typryx whose export has -training-dir was judged unable to log"; }
+  n=$((n + 1))
+  ! typed_bin_has_training "$work/typryx-old" || { fails=$((fails + 1)); echo "FAIL: a typryx with no training export was judged able to log, so the flag would be silently ignored"; }
+  n=$((n + 1))
+  ! typed_bin_has_training "$work/no-such-binary" || { fails=$((fails + 1)); echo "FAIL: a missing binary was judged able to log"; }
+fi
+
 if [ "$fails" -gt 0 ]; then
   printf 'FAIL: %d of %d typed-mode check(s) failed.\n' "$fails" "$n"
   exit 1
 fi
-printf 'OK: %d typed-mode checks: default off, refusals before any side effect, and the key file is named, never read.\n' "$n"
+printf 'OK: %d typed-mode checks: default off, refusals before any side effect, the key file is named never read, and the training log is opt-in and private.\n' "$n"

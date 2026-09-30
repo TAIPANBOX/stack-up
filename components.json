@@ -97,7 +97,11 @@
         "typed_data_mode_is_chosen_not_defaulted": {
           "value": "--typed-mode jev | own-model | off; unset keeps today's behaviour (nothing without --with-typed, the stub backend with it)",
           "why": "@decided 2026-09-30: a customer chooses where typed-answer data goes. jev sends the named fields of each question to TypeSafe AI's hosted API and takes its key from a file named by --typed-key-file, never from an environment value; own-model points typryx at the customer's own OpenAI-compatible server (--typed-model-url ending in /v1, --typed-model, optional key file) so nothing leaves their hardware; off starts nothing. Refusals happen at argument parsing, before any build, and --typed-plan prints the resolved choice without starting anything. The launcher never reads the key file's bytes; typryx does.",
-          "note": "@claude 2026-09-30: TYPRYX_TRAINING_DIR, typryx's opt-in local training log, is not wired here. It is not on typryx's main branch (checked by grepping the typryx source this launcher builds), and this launcher builds from source at whatever it finds. Wire it once it is merged there."
+          "note": "@claude 2026-09-30: TYPRYX_TRAINING_DIR is wired by the separate flag in typed_training_log_is_opt_in; it is typryx v0.3.0 and newer, and this launcher builds from source at whatever it finds, so the flag checks the built typryx can log before it starts one."
+        },
+        "typed_training_log_is_opt_in": {
+          "value": "--typed-training (off by default) sets TYPRYX_TRAINING_DIR=$STACK_UP_HOME/typryx/training, created 0700, beside the ledger at $STACK_UP_HOME/typryx/ledger; needs typryx to run and typryx v0.3.0 or newer",
+          "why": "@decided 2026-09-30: a customer can train a model of their own on their own questions and their own human judgements, and typryx supplies the records, so the training log is an opt-in kept off unless asked for. The log holds the question fields a template lets through and never a backend's answer, and the export (typryx export --training) takes its labels from human truths posted to /v1/outcome only, so a hosted provider's answers never become training labels through it. Nothing in this launcher reads or sends the log."
         }
       }
     }

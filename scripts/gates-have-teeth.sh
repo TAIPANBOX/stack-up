@@ -301,6 +301,46 @@ run_case "typed-mode: an -u placed after an assignment in the env array" fail \
 edit("up.sh", "\"TYPRYX_OPENAI_MODEL=$TYPED_MODEL\")\n      fi", "\"TYPRYX_OPENAI_MODEL=$TYPED_MODEL\" -u TYPRYX_OPENAI_KEY_FILE)\n      fi")')" \
 	"an -u comes after an assignment"
 
+# The local training log (`--typed-training`). Each of these is an edit with a
+# reason: make it on by default because "people will want it", drop the refusal
+# that says it has nothing to attach to, let the training variable jump ahead of
+# the `-u` entries, skip the tightening of a directory that already exists, or
+# stop asking whether typryx can log at all.
+run_case "typed-mode: the training log is on by default" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "TYPED_PLAN=0\nTYPED_TRAINING=0\n", "TYPED_PLAN=0\nTYPED_TRAINING=1\n")')" \
+	"--typed-mode off: exit 2, wanted 0"
+
+run_case "typed-mode: --typed-training with no typryx is ignored, not refused" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "    [ \"$WITH_TYPED\" -eq 1 ] || typed_refuse \"--typed-training needs typryx to run", "    [ \"$WITH_TYPED\" -eq 1 ] || true # \"--typed-training needs typryx to run")')" \
+	"training, no typryx to attach to: exit 0, wanted 2"
+
+run_case "typed-mode: the training variable jumps ahead of the -u entries" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "TYPRYX_ENV+=(\"TYPRYX_TRAINING_DIR=$TYPED_TRAINING_DIR\")", "TYPRYX_ENV=(\"TYPRYX_TRAINING_DIR=$TYPED_TRAINING_DIR\" \"${TYPRYX_ENV[@]}\")")')" \
+	"an -u comes after an assignment"
+
+run_case "typed-mode: the training directory is made with the default umask" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "( umask 077; mkdir -p \"$1\" ) && chmod 700 \"$1\"", "mkdir -p \"$1\"")')" \
+	"a fresh training directory is"
+
+run_case "typed-mode: a training directory that already existed stays loose" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "( umask 077; mkdir -p \"$1\" ) && chmod 700 \"$1\"", "( umask 077; mkdir -p \"$1\" )")')" \
+	"already existed at 755"
+
+run_case "typed-mode: an older typryx is judged able to keep a log" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "case \"$help\" in *-training-dir*) return 0 ;; *) return 1 ;; esac", "return 0")')" \
+	"judged able to log"
+
+run_case "typed-mode: a plan creates the training directory" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "    TYPRYX_ENV+=(\"TYPRYX_TRAINING_DIR=$TYPED_TRAINING_DIR\")", "    TYPRYX_ENV+=(\"TYPRYX_TRAINING_DIR=$TYPED_TRAINING_DIR\")\n    typed_make_training_dir \"$TYPED_TRAINING_DIR\"")')" \
+	"a refusal or a plan created"
+
 echo
 echo "=== and what they must NOT catch ==="
 
@@ -359,6 +399,12 @@ run_case "typed-mode: a log line names the key file's path, not its content" pas
 	'./scripts/typed-mode.sh' \
 	"$(py 'edit("up.sh", "log \"typryx data: $TYPED_LEAVES\"", "log \"typryx data: $TYPED_LEAVES\"\n  log \"typryx key file: ${TYPED_KEY_FILE:-none}\"")')"
 
+# Rewording the launch's own confirmation line is not a fault: the gate judges
+# what is set and whether it is private, not the sentence announcing it.
+run_case "typed-mode: the training log's launch line is reworded" pass \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "(0700, this machine only; no backend answers in it)", "(private, local)")')"
+
 echo
 echo "=== and the one this estate learned the hard way ==="
 echo "    a gate whose subject is gone must SAY so, not report OK on nothing"
@@ -409,6 +455,23 @@ run_case "typed-mode: the key file variable is renamed away" fail \
 	"$(py 's = open("up.sh").read()
 assert "TYPED_KEY_FILE" in s, "variable not present"
 open("up.sh", "w").write(s.replace("TYPED_KEY_FILE", "TYPED_KEYF"))')" \
+	"measured nothing"
+
+# The two training-log checks run the launcher's OWN functions, cut out of up.sh
+# by name. Rename one and the plan still works, so only that half can notice it
+# has nothing to run.
+run_case "typed-mode: the training directory function is renamed away" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 's = open("up.sh").read()
+assert "typed_make_training_dir" in s, "function not present"
+open("up.sh", "w").write(s.replace("typed_make_training_dir", "typed_mk_trdir"))')" \
+	"measured nothing"
+
+run_case "typed-mode: the typryx can-it-log function is renamed away" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 's = open("up.sh").read()
+assert "typed_bin_has_training" in s, "function not present"
+open("up.sh", "w").write(s.replace("typed_bin_has_training", "typed_bin_can_log"))')" \
 	"measured nothing"
 
 echo

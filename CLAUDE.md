@@ -216,16 +216,34 @@ building here and the thing that most often gets skipped.
     path in its environment, and never puts the bytes in a variable, an
     argument or a log line. Under a chosen mode the other backend's variables
     are removed from typryx's environment, so a stale exported
-    `TYPRYX_JEV_URL` cannot redirect the key. Not wired yet:
-    `TYPRYX_TRAINING_DIR` (typryx's opt-in local training log); it is not on
-    typryx's main branch, which is what this launcher builds.
-    *(gate: `scripts/typed-mode.sh`, 47 checks through `--typed-plan`, plus a
-    static check that up.sh never reads the key file; 11 cases in
+    `TYPRYX_JEV_URL` cannot redirect the key.
+    **The local training log is a second opt-in, `--typed-training`, off by
+    default.** `@decided 2026-09-30`: a customer may train a model of their own
+    on their own questions and their own human judgements, typryx keeps the
+    records, and the log is off unless switched on. On, it sets typryx's
+    `TYPRYX_TRAINING_DIR` to `$STACK_UP_HOME/typryx/training`, beside the ledger
+    the launch already gives typryx (the export needs the ledger for the human
+    truths). The launcher creates that directory 0700 (and tightens one that
+    existed looser), refuses the flag when typryx is not going to run (exit 2,
+    at argument parsing, like every other bad choice here), refuses a typryx
+    older than v0.3.0 at launch rather than start one that ignores the variable,
+    and does not touch the path in `--typed-plan`. The log holds the question
+    fields a template lets through and never a backend's answer, so a Jev answer
+    cannot become a training label through it; the launcher never reads or
+    sends the log, and README shows `typryx export --training`.
+    *(gate: `scripts/typed-mode.sh`, 77 checks through `--typed-plan`, plus a
+    static check that up.sh never reads the key file, plus the training log's
+    directory function and typryx's can-it-log function cut out of `up.sh` and
+    run (0700 fresh and tightened, an old typryx refused); 21 typed cases in
     `gates-have-teeth.sh`. What it does not cover: typryx actually running in
     each mode, and the key staying out of the running process's arguments and
     log. That half was shown by hand in the pull request that added this
     invariant, not by a script, because it needs a built typryx and a free
-    port.)*
+    port. The same holds for the training log: that a real ask writes a line,
+    that the export pairs it with a posted truth and drops the extra field was
+    run by hand in the pull request that added it, not by a script. typryx is
+    built from whatever checkout is found, no tag is pinned, so a run on an
+    older checkout is caught only by the launch-time refusal, not by the plan.)*
 
 An approved architecture decision is **not finished** until it is two things: a
 numbered invariant in this file, and a gate in a script if it can be checked

@@ -111,6 +111,14 @@
 #   --typed-model-url <url>     own-model only: the server's base URL, ending in
 #                       /v1 (for example http://127.0.0.1:11434/v1)
 #   --typed-model <name>        own-model only: the model name the server knows
+#   --typed-training    also keep typryx's opt-in local training log (off
+#                       unless given; needs typryx to run, so --with-typed or
+#                       a --typed-mode of jev or own-model; needs typryx
+#                       v0.3.0 or newer). Sets TYPRYX_TRAINING_DIR to a private
+#                       (0700) directory under this launcher's own state, next
+#                       to the ledger. The log stays on this machine; it holds
+#                       the question fields a template lets through and never a
+#                       backend's answer. README.md shows the export.
 #   --typed-plan        resolve the typed-answers choice, print what would start
 #                       and what would leave this machine (paths, never key
 #                       contents), and exit before building or starting
@@ -229,6 +237,7 @@ TYPED_KEY_FILE=""
 TYPED_MODEL_URL=""
 TYPED_MODEL=""
 TYPED_PLAN=0
+TYPED_TRAINING=0
 FORCE_INSTALL=0
 WORKSPACE="${STACK_UP_WORKSPACE:-$(dirname "$SCRIPT_DIR")}"
 
@@ -265,6 +274,7 @@ while [ $# -gt 0 ]; do
     --typed-model-url=*) TYPED_MODEL_URL="${1#--typed-model-url=}"; [ -n "$TYPED_MODEL_URL" ] || { echo "stack-up: --typed-model-url needs a URL ending in /v1" >&2; exit 2; } ;;
     --typed-model) shift; TYPED_MODEL="${1:-}"; [ -n "$TYPED_MODEL" ] || { echo "stack-up: --typed-model needs a model name" >&2; exit 2; } ;;
     --typed-model=*) TYPED_MODEL="${1#--typed-model=}"; [ -n "$TYPED_MODEL" ] || { echo "stack-up: --typed-model needs a model name" >&2; exit 2; } ;;
+    --typed-training) TYPED_TRAINING=1 ;;
     --typed-plan) TYPED_PLAN=1 ;;
     --force-install) FORCE_INSTALL=1 ;;
     --workspace) shift; WORKSPACE="${1:-}"; [ -n "$WORKSPACE" ] || { echo "stack-up: --workspace needs a directory" >&2; exit 2; } ;;
@@ -299,11 +309,26 @@ done
 #
 # TYPRYX_ENV is the exact argument list the launch hands to `env`, and the plan
 # prints that same array, so the plan cannot drift from the launch.
+#
+# THE LOCAL TRAINING LOG is a separate, second opt-in: `--typed-training`.
+# @decided 2026-09-30: a customer can train a model of their own on their own
+# questions and their own human judgements, typryx keeps the records for it,
+# and the log is off unless switched on. It sets typryx's TYPRYX_TRAINING_DIR to
+# a private directory beside the ledger (the export needs the ledger too, for
+# the human truths, and the launch already gives typryx one). The log holds the
+# question fields a template lets through and never a backend's answer, so a
+# hosted provider's answers cannot become labels through it. Nothing here
+# reads it or sends it anywhere; the README shows `typryx export --training`.
 # --------------------------------------------------------------------------
 
 TYPED_BACKEND=""
 TYPED_LEAVES=""
 TYPRYX_ENV=()
+# typryx's own state directory under this launcher's, and the two places in it
+# the launch and the plan must agree on.
+TYPED_STATE_DIR="$STACK_UP_HOME/typryx"
+TYPED_LEDGER_DIR="$TYPED_STATE_DIR/ledger"
+TYPED_TRAINING_DIR="$TYPED_STATE_DIR/training"
 
 typed_refuse() { printf 'stack-up: %s\n' "$*" >&2; exit 2; }
 
@@ -317,6 +342,25 @@ typed_key_file_ok() {
   grep -q '[^[:space:]]' "$TYPED_KEY_FILE" 2>/dev/null || typed_refuse "$1: $TYPED_KEY_FILE is empty (the file must hold the key)"
 }
 
+# typed_make_training_dir <dir> - create the training directory private (0700),
+# and tighten it if it already existed looser. typryx creates it 0700 itself
+# when it is missing; this makes it true for the launcher's own part too and
+# for a directory somebody made earlier with the default umask.
+typed_make_training_dir() {
+  ( umask 077; mkdir -p "$1" ) && chmod 700 "$1"
+}
+
+# typed_bin_has_training <typryx-binary> - does this typryx have a training log?
+# Judged by its own `export` usage naming -training-dir, so an older typryx (the
+# log arrived in v0.3.0) is refused instead of silently ignoring a variable it
+# has never heard of while the operator believes the log is on.
+typed_bin_has_training() {
+  local help
+  [ -x "$1" ] || return 1
+  help="$("$1" export -h 2>&1)"
+  case "$help" in *-training-dir*) return 0 ;; *) return 1 ;; esac
+}
+
 resolve_typed_mode() {
   case "$TYPED_MODE" in
     ""|jev|own-model|off) ;;
@@ -324,6 +368,9 @@ resolve_typed_mode() {
   esac
   if [ -n "$TYPED_KEY_FILE" ] && [ "$TYPED_MODE" != jev ] && [ "$TYPED_MODE" != own-model ]; then
     typed_refuse "--typed-key-file needs --typed-mode jev or own-model"
+  fi
+  if [ "$TYPED_TRAINING" -eq 1 ] && [ "$TYPED_MODE" = off ]; then
+    typed_refuse "--typed-training and --typed-mode off contradict each other: off starts no typryx, so there is nothing to keep a log"
   fi
   if { [ -n "$TYPED_MODEL_URL" ] || [ -n "$TYPED_MODEL" ]; } && [ "$TYPED_MODE" != own-model ]; then
     typed_refuse "--typed-model-url and --typed-model belong to --typed-mode own-model"
@@ -382,6 +429,14 @@ resolve_typed_mode() {
       fi
       ;;
   esac
+
+  # The training log, last: it is one more NAME=VALUE at the END of the array,
+  # after every `-u`, so the ordering rule above still holds. Off (the default)
+  # adds nothing to the array and nothing to the plan.
+  if [ "$TYPED_TRAINING" -eq 1 ]; then
+    [ "$WITH_TYPED" -eq 1 ] || typed_refuse "--typed-training needs typryx to run: add --with-typed, or choose --typed-mode jev or own-model"
+    TYPRYX_ENV+=("TYPRYX_TRAINING_DIR=$TYPED_TRAINING_DIR")
+  fi
 }
 
 print_typed_plan() {
@@ -394,6 +449,12 @@ print_typed_plan() {
   printf 'typed: leaves this machine: %s\n' "$TYPED_LEAVES"
   if [ -n "$TYPED_KEY_FILE" ]; then
     printf 'typed: key file: %s (this launcher only checked it is not blank; it never reads or prints the key)\n' "$TYPED_KEY_FILE"
+  fi
+  if [ "$TYPED_TRAINING" -eq 1 ]; then
+    printf 'typed: training log: on (opt-in; typryx writes one line per answered, templated question)\n'
+    printf 'typed: training dir: %s (created 0700, local disk only; holds the question fields a template lets through, no backend answer)\n' "$TYPED_TRAINING_DIR"
+    printf 'typed: ledger dir: %s (the human truths the export pairs them with)\n' "$TYPED_LEDGER_DIR"
+    printf 'typed: export: typryx export --training --training-dir %s --ledger %s\n' "$TYPED_TRAINING_DIR" "$TYPED_LEDGER_DIR"
   fi
   local e unset_next=0
   for e in "${TYPRYX_ENV[@]}"; do
@@ -1773,8 +1834,16 @@ if [ "$WITH_TYPED" -eq 1 ]; then
   # (unknown_schema, see above) rather than a second, unrelated one (foreign
   # trust domain) standing in for it.
   TYPRYX_AGENT="agent://$DEMO_TRUST_DOMAIN/typryx-demo"
-  TYPRYX_DIR="$STACK_UP_HOME/typryx"
+  TYPRYX_DIR="$TYPED_STATE_DIR"
   mkdir -p "$TYPRYX_DIR"
+  if [ "$TYPED_TRAINING" -eq 1 ]; then
+    # Refuse an older typryx now rather than start one that ignores the
+    # variable while the operator believes the log is on (it is in v0.3.0+).
+    typed_bin_has_training "$TYPRYX_BIN" \
+      || die "--typed-training needs typryx v0.3.0 or newer, and $TYPRYX_BIN has no training log. Update the typryx checkout ($TYPRYX_REPO) and run again with --force-install if another tool installed it."
+    typed_make_training_dir "$TYPED_TRAINING_DIR" || die "could not create a private training directory at $TYPED_TRAINING_DIR"
+    log "typryx training log: ON, $TYPED_TRAINING_DIR (0700, this machine only; no backend answers in it)"
+  fi
 
   # The backend comes from resolve_typed_mode, near the top of this file:
   # --typed-mode's choice when one was made, otherwise `stub` unless the
@@ -1793,7 +1862,7 @@ if [ "$WITH_TYPED" -eq 1 ]; then
   TYPRYX_KEYS="$TYPRYX_SECRET=$TYPRYX_AGENT" \
   TYPRYX_TEMPLATES="$TYPRYX_REPO/examples/templates" \
   TYPRYX_EVENTS="$EVENTS_DIR/typryx.ndjson" \
-  TYPRYX_LEDGER_DIR="$TYPRYX_DIR/ledger" \
+  TYPRYX_LEDGER_DIR="$TYPED_LEDGER_DIR" \
   TYPRYX_ACCEPT_KEY_IN_META="1" \
     env ${TYPRYX_ENV[@]+"${TYPRYX_ENV[@]}"} "$TYPRYX_BIN" > "$LOGS_DIR/typryx.log" 2>&1 &
   register typryx "$!" TERM
@@ -2169,7 +2238,10 @@ if [ "$WITH_TYPED" -eq 1 ]; then
   printf '  curl -s -X POST http://127.0.0.1:%s/v1/ask -H "X-Typryx-Key: %s" -H "Content-Type: application/json" -d '"'"'{"template":"eval.outcome_met","state":{"task":"2+2","final_answer":"4"}}'"'"'\n' \
     "$TYPRYX_PORT" "$TYPRYX_SECRET"
   log "         data:    $TYPED_LEAVES"
-  log "         journal: $EVENTS_DIR/typryx.ndjson (on the shared bus; trailryx-seal reads it and refuses it for unknown_schema, see below)   ledger: $TYPRYX_DIR/ledger"
+  log "         journal: $EVENTS_DIR/typryx.ndjson (on the shared bus; trailryx-seal reads it and refuses it for unknown_schema, see below)   ledger: $TYPED_LEDGER_DIR"
+  if [ "$TYPED_TRAINING" -eq 1 ]; then
+    log "         training log: $TYPED_TRAINING_DIR (on this machine only; export with: typryx export --training --training-dir $TYPED_TRAINING_DIR --ledger $TYPED_LEDGER_DIR --out train.jsonl)"
+  fi
   log "broker:  http://127.0.0.1:$BROKER_PORT/mcp  (key: $BROKER_SECRET, minted fresh this run, fronts typryx as upstream \"typryx\")"
   # x-fuse-agent-id, in the example itself, is not decoration: the broker's
   # own tool_call record needs an agent id from SOMEWHERE (this header, or an

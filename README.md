@@ -228,19 +228,62 @@ will score differently.
 
 **Your own model, on your own data.** We do not fine-tune or ship models for
 customers. If you choose `own-model`, you can fine-tune and calibrate that
-model on your own data, and typryx gives you what you need to do it. Today
-that is the ledger this launcher already keeps under
-`~/.stack-up/typryx/ledger` (every answer, and the outcome you later record
-against it) and `typryx calibration`, which scores the ledger (Brier score and
-ECE) so a tuned model's probabilities can be checked against what actually
-happened. An opt-in local training log, off by default and enabled through
-`TYPRYX_TRAINING_DIR`, is **planned** in typryx and is not wired into this
-launcher yet: it is not on typryx's main branch yet, which is what this launcher builds.
-Train on outcomes you record yourself, not on another model's answers: a
-hosted provider's terms may forbid using its output to train a model.
-`@decided 2026-09-30`: the three modes, the choice being the operator's, and
-training being the customer's own work on their own data are settled; the
-planned log is a plan, not a shipped feature.
+model on your own data, and typryx gives you what you need to do it: the
+ledger this launcher keeps under `~/.stack-up/typryx/ledger` (every answer, and
+the truth you later record against it), `typryx calibration`, which scores the
+ledger (Brier score and ECE) so a tuned model's probabilities can be checked
+against what happened, and an opt-in local training log.
+
+The training log is off unless you switch it on, with `--typed-training`. It
+needs typryx v0.3.0 or newer (the launcher refuses an older one rather than
+start a typryx that would quietly keep no log) and needs typryx to run, so pair
+it with `--with-typed` or with `--typed-mode jev` or `own-model`:
+
+```sh
+./up.sh --typed-mode own-model --typed-model-url http://127.0.0.1:11434/v1 \
+        --typed-model qwen2.5:7b --typed-training
+```
+
+This sets typryx's `TYPRYX_TRAINING_DIR` to `~/.stack-up/typryx/training`, a
+directory the launcher creates private (mode 0700, tightened if it already
+existed looser) beside the ledger. `--typed-plan` prints both paths and the
+export command without creating anything. Each answered question that has a
+template adds one line holding the fields the template lets through to the
+model and nothing else: no backend answer, no probabilities. The log starts
+when you switch it on, and typryx never rotates or deletes it. It stays on this
+machine: nothing in this launcher reads it or sends it anywhere.
+
+Then the loop is: ask, record the truth a person decided, export, fine-tune
+with your own tooling, serve the tuned model behind the same kind of server and
+compare it with `typryx calibration`.
+
+```sh
+# record the truth a person decided for one answer (the answer_id is in the
+# ask's reply; the truth is a choice name, a score index, or true/false)
+curl -s -X POST http://127.0.0.1:4320/v1/outcome -H "X-Typryx-Key: <key>" \
+  -H "Content-Type: application/json" \
+  -d '{"answer_id":"<id>","truth":true,"source":"human"}'
+
+# pair each logged question with the truth a person posted for it
+# (the binary is ~/.taipan/bin/typryx)
+typryx export --training \
+  --training-dir ~/.stack-up/typryx/training \
+  --ledger ~/.stack-up/typryx/ledger \
+  --out train.jsonl
+```
+
+The export carries **human truths only**: every row is `template`,
+`template_version`, `type`, `state` and `label`, where `label` is the truth a
+person posted, never a backend's answer. An answer with no truth is skipped and
+counted, however confident the model was. That matters for `jev`: a hosted
+provider's terms may forbid using its output to train another model, so a Jev
+answer never becomes a label here. typryx cannot see how a truth was produced,
+so post labels you decided yourself, not ones copied from a model. The log
+holds your questions, which can be sensitive: where that disk is backed up, and
+for how long, is yours to decide.
+`@decided 2026-09-30`: the three modes, the choice being the operator's, the
+log being opt-in and off by default, and training being the customer's own work
+on their own data are settled.
 
 The door key is generated fresh on every run, held only in this process's
 environment, and never written to a file, the same posture as scopyx's own
@@ -543,6 +586,7 @@ keeps. Only a total refusal stops the run.
 --typed-key-file <path>     a file holding the key (required for jev, optional for own-model)
 --typed-model-url <url>     own-model: the server's base URL, ending in /v1
 --typed-model <name>        own-model: the model name the server knows
+--typed-training   keep typryx's opt-in local training log (off by default; needs typryx v0.3.0+, see "Your own model, on your own data")
 --typed-plan       print the resolved typed-answers choice and exit, starting nothing
 -h, --help         show help
 ```

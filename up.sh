@@ -92,8 +92,29 @@
 #                       event types (SPEC 6.2), and its ledger stays under its
 #                       own directory. tokenfuse is not modified for this:
 #                       the broker is wired by configuration only. See
-#                       README.md for how an operator switches to a real
-#                       backend.
+#                       README.md, "Typed answers: choose where your data
+#                       goes".
+#   --typed-mode <m>    choose where typryx's data goes (implies --with-typed
+#                       unless off). jev: the named fields of each question go
+#                       to TypeSafe AI's hosted typed-decision API, with the key
+#                       read by typryx from --typed-key-file. own-model: your
+#                       own OpenAI-compatible model server (for example an
+#                       Ollama or vLLM on your own hardware); questions go only
+#                       to --typed-model-url. off: typryx is not started. Not
+#                       given: today's behaviour (nothing without --with-typed,
+#                       the stub backend with it).
+#   --typed-key-file <path>     a FILE holding the key, never the key itself.
+#                       Required with jev, optional with own-model. This
+#                       launcher only checks the file is not blank and hands
+#                       typryx the path: it never reads the key's bytes, and
+#                       prints only the path.
+#   --typed-model-url <url>     own-model only: the server's base URL, ending in
+#                       /v1 (for example http://127.0.0.1:11434/v1)
+#   --typed-model <name>        own-model only: the model name the server knows
+#   --typed-plan        resolve the typed-answers choice, print what would start
+#                       and what would leave this machine (paths, never key
+#                       contents), and exit before building or starting
+#                       anything. A bad choice is refused here, exit 2.
 #   --force-install     replace binaries another tool installed (default: leave
 #                       them alone and use them as they are)
 #   --workspace <dir>   look here for sibling checkouts before cloning
@@ -201,6 +222,13 @@ NO_EGRESS=0
 WITH_DELEGATION=0
 WITH_FINOPS=0
 WITH_TYPED=0
+# The typed-answers data mode (see resolve_typed_mode below). Empty means the
+# operator did not choose one, which is today's behaviour exactly.
+TYPED_MODE=""
+TYPED_KEY_FILE=""
+TYPED_MODEL_URL=""
+TYPED_MODEL=""
+TYPED_PLAN=0
 FORCE_INSTALL=0
 WORKSPACE="${STACK_UP_WORKSPACE:-$(dirname "$SCRIPT_DIR")}"
 
@@ -229,6 +257,15 @@ while [ $# -gt 0 ]; do
     --with-delegation) WITH_DELEGATION=1 ;;
     --with-finops) WITH_FINOPS=1 ;;
     --with-typed) WITH_TYPED=1 ;;
+    --typed-mode) shift; TYPED_MODE="${1:-}"; [ -n "$TYPED_MODE" ] || { echo "stack-up: --typed-mode needs jev, own-model or off" >&2; exit 2; } ;;
+    --typed-mode=*) TYPED_MODE="${1#--typed-mode=}"; [ -n "$TYPED_MODE" ] || { echo "stack-up: --typed-mode needs jev, own-model or off" >&2; exit 2; } ;;
+    --typed-key-file) shift; TYPED_KEY_FILE="${1:-}"; [ -n "$TYPED_KEY_FILE" ] || { echo "stack-up: --typed-key-file needs a file path" >&2; exit 2; } ;;
+    --typed-key-file=*) TYPED_KEY_FILE="${1#--typed-key-file=}"; [ -n "$TYPED_KEY_FILE" ] || { echo "stack-up: --typed-key-file needs a file path" >&2; exit 2; } ;;
+    --typed-model-url) shift; TYPED_MODEL_URL="${1:-}"; [ -n "$TYPED_MODEL_URL" ] || { echo "stack-up: --typed-model-url needs a URL ending in /v1" >&2; exit 2; } ;;
+    --typed-model-url=*) TYPED_MODEL_URL="${1#--typed-model-url=}"; [ -n "$TYPED_MODEL_URL" ] || { echo "stack-up: --typed-model-url needs a URL ending in /v1" >&2; exit 2; } ;;
+    --typed-model) shift; TYPED_MODEL="${1:-}"; [ -n "$TYPED_MODEL" ] || { echo "stack-up: --typed-model needs a model name" >&2; exit 2; } ;;
+    --typed-model=*) TYPED_MODEL="${1#--typed-model=}"; [ -n "$TYPED_MODEL" ] || { echo "stack-up: --typed-model needs a model name" >&2; exit 2; } ;;
+    --typed-plan) TYPED_PLAN=1 ;;
     --force-install) FORCE_INSTALL=1 ;;
     --workspace) shift; WORKSPACE="${1:-}"; [ -n "$WORKSPACE" ] || { echo "stack-up: --workspace needs a directory" >&2; exit 2; } ;;
     -h|--help) usage; exit 0 ;;
@@ -236,6 +273,140 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
+
+# --------------------------------------------------------------------------
+# Typed answers: where the data goes
+#
+# Resolved HERE, straight after the arguments and before anything is built,
+# probed or written, so a bad choice is refused in milliseconds and never after
+# a twenty-minute build. `--typed-plan` stops right after this block.
+#
+# @decided 2026-09-30: a customer picks one of three data modes for typed
+# answers. jev sends the named fields of each question to TypeSafe AI's hosted
+# API. own-model points typryx at the customer's own OpenAI-compatible server,
+# so nothing leaves their hardware. off starts nothing. The choice is explicit:
+# no mode is picked for anyone, and `--with-typed` alone keeps the stub backend.
+#
+# THE KEY IS A FILE, NEVER A VALUE. This launcher checks the file exists and is
+# not blank (`grep -q`, which prints nothing) and hands typryx the PATH in its
+# environment; typryx reads the bytes itself. The content is never put in a
+# variable here, an argument, or a log line. Held by scripts/typed-mode.sh.
+#
+# AN EXPORTED VARIABLE CANNOT REDIRECT A CHOSEN MODE. Under jev or own-model the
+# other backend's variables are removed from typryx's environment (`env -u`),
+# so a stale TYPRYX_JEV_URL left in a shell cannot send the key somewhere the
+# operator did not name.
+#
+# TYPRYX_ENV is the exact argument list the launch hands to `env`, and the plan
+# prints that same array, so the plan cannot drift from the launch.
+# --------------------------------------------------------------------------
+
+TYPED_BACKEND=""
+TYPED_LEAVES=""
+TYPRYX_ENV=()
+
+typed_refuse() { printf 'stack-up: %s\n' "$*" >&2; exit 2; }
+
+# typed_key_file_ok <flag> - refuse unless $TYPED_KEY_FILE is a readable file
+# with something in it. Makes the path absolute first: it is handed to another
+# process that may not share this one's working directory.
+typed_key_file_ok() {
+  case "$TYPED_KEY_FILE" in /*) ;; *) TYPED_KEY_FILE="$PWD/$TYPED_KEY_FILE" ;; esac
+  [ -e "$TYPED_KEY_FILE" ] || typed_refuse "$1: $TYPED_KEY_FILE does not exist"
+  { [ -f "$TYPED_KEY_FILE" ] && [ -r "$TYPED_KEY_FILE" ]; } || typed_refuse "$1: $TYPED_KEY_FILE is not a readable file"
+  grep -q '[^[:space:]]' "$TYPED_KEY_FILE" 2>/dev/null || typed_refuse "$1: $TYPED_KEY_FILE is empty (the file must hold the key)"
+}
+
+resolve_typed_mode() {
+  case "$TYPED_MODE" in
+    ""|jev|own-model|off) ;;
+    *) typed_refuse "--typed-mode takes jev, own-model or off (got '$TYPED_MODE')" ;;
+  esac
+  if [ -n "$TYPED_KEY_FILE" ] && [ "$TYPED_MODE" != jev ] && [ "$TYPED_MODE" != own-model ]; then
+    typed_refuse "--typed-key-file needs --typed-mode jev or own-model"
+  fi
+  if { [ -n "$TYPED_MODEL_URL" ] || [ -n "$TYPED_MODEL" ]; } && [ "$TYPED_MODE" != own-model ]; then
+    typed_refuse "--typed-model-url and --typed-model belong to --typed-mode own-model"
+  fi
+
+  case "$TYPED_MODE" in
+    off)
+      [ "$WITH_TYPED" -eq 0 ] || typed_refuse "--typed-mode off and --with-typed contradict each other: pick one"
+      ;;
+    jev)
+      [ -n "$TYPED_KEY_FILE" ] || typed_refuse "--typed-mode jev needs --typed-key-file <path>: a file holding the Jev key, never the key itself"
+      typed_key_file_ok --typed-key-file
+      WITH_TYPED=1
+      TYPED_BACKEND=jev
+      TYPED_LEAVES="the named fields of each question go to TypeSafe AI's hosted Jev API (typryx's template allowlist decides which fields); nothing else"
+      TYPRYX_ENV=(-u TYPRYX_JEV_URL -u TYPRYX_JEV_MODEL
+        -u TYPRYX_OPENAI_URL -u TYPRYX_OPENAI_MODEL -u TYPRYX_OPENAI_KEY_FILE
+        "TYPRYX_BACKEND=jev" "TYPRYX_JEV_KEY_FILE=$TYPED_KEY_FILE")
+      ;;
+    own-model)
+      [ -n "$TYPED_MODEL_URL" ] || typed_refuse "--typed-mode own-model needs --typed-model-url <url>: your model server's base URL, ending in /v1"
+      [ -n "$TYPED_MODEL" ] || typed_refuse "--typed-mode own-model needs --typed-model <name>: the model name your server knows"
+      # http(s), a host, optional port and path, ending in /v1 or /v1/; no
+      # userinfo (a credential in a URL lands in logs), no query, no fragment.
+      [[ "$TYPED_MODEL_URL" =~ ^https?://[^/?#@[:space:]]+(/[^?#[:space:]]*)?/v1/?$ ]] \
+        || typed_refuse "--typed-model-url '$TYPED_MODEL_URL' must be an http(s) URL ending in /v1, with no userinfo, query or fragment"
+      case "$TYPED_MODEL" in
+        *[[:space:][:cntrl:]]*) typed_refuse "--typed-model must be a single token without spaces" ;;
+      esac
+      WITH_TYPED=1
+      TYPED_BACKEND=openai-logprobs
+      TYPED_LEAVES="questions go only to the model server you named, $TYPED_MODEL_URL; nothing goes to TypeSafe or anyone else"
+      TYPRYX_ENV=(-u TYPRYX_JEV_KEY_FILE -u TYPRYX_JEV_URL -u TYPRYX_JEV_MODEL
+        "TYPRYX_BACKEND=openai-logprobs" "TYPRYX_OPENAI_URL=$TYPED_MODEL_URL" "TYPRYX_OPENAI_MODEL=$TYPED_MODEL")
+      if [ -n "$TYPED_KEY_FILE" ]; then
+        typed_key_file_ok --typed-key-file
+        TYPRYX_ENV+=("TYPRYX_OPENAI_KEY_FILE=$TYPED_KEY_FILE")
+      else
+        TYPRYX_ENV+=(-u TYPRYX_OPENAI_KEY_FILE)
+      fi
+      ;;
+    "")
+      # Not chosen: today's behaviour, byte for byte. typryx only with
+      # --with-typed, and then whatever backend the operator exported, else stub.
+      TYPED_BACKEND="${TYPRYX_BACKEND:-stub}"
+      TYPRYX_ENV=("TYPRYX_BACKEND=$TYPED_BACKEND")
+      if [ "$TYPED_BACKEND" = stub ]; then
+        TYPED_LEAVES="nothing: the stub backend is deterministic and makes no outbound call"
+      else
+        TYPED_LEAVES="whatever the TYPRYX_BACKEND you exported does; this launcher did not choose it"
+      fi
+      ;;
+  esac
+}
+
+print_typed_plan() {
+  if [ "$WITH_TYPED" -eq 0 ]; then
+    printf 'typed: typryx is not started (mode: %s); nothing typed-related would run or leave this machine\n' "${TYPED_MODE:-off, the default}"
+    return 0
+  fi
+  printf 'typed: mode: %s\n' "${TYPED_MODE:-default (--with-typed alone)}"
+  printf 'typed: backend: %s\n' "$TYPED_BACKEND"
+  printf 'typed: leaves this machine: %s\n' "$TYPED_LEAVES"
+  if [ -n "$TYPED_KEY_FILE" ]; then
+    printf 'typed: key file: %s (this launcher only checked it is not blank; it never reads or prints the key)\n' "$TYPED_KEY_FILE"
+  fi
+  local e unset_next=0
+  for e in "${TYPRYX_ENV[@]}"; do
+    if [ "$unset_next" -eq 1 ]; then
+      printf 'typed: env: -u %s\n' "$e"; unset_next=0
+    elif [ "$e" = "-u" ]; then
+      unset_next=1
+    else
+      printf 'typed: env: %s\n' "$e"
+    fi
+  done
+}
+
+resolve_typed_mode
+if [ "$TYPED_PLAN" -eq 1 ]; then
+  print_typed_plan
+  exit 0
+fi
 
 # --------------------------------------------------------------------------
 # Small helpers
@@ -1544,12 +1715,11 @@ fi
 # scopyx, and unlike vouchryx's revoke key there is nothing here that needs to
 # survive a restart.
 #
-# THE BACKEND is `stub` unless the operator exported another one: free,
-# deterministic, and makes no outbound call. To point a run at a local model server instead, export
-# TYPRYX_BACKEND=openai-logprobs plus TYPRYX_OPENAI_URL and TYPRYX_OPENAI_MODEL
-# (optionally TYPRYX_OPENAI_KEY_FILE) before calling this script; it is never
-# chosen here, and TYPRYX_BACKEND=jev (a paid, external backend) is never
-# chosen by this launcher at all.
+# THE BACKEND is `stub` unless the operator chose a data mode (--typed-mode,
+# resolved near the top of this file: jev or own-model) or exported a backend
+# of their own: stub is free, deterministic, and makes no outbound call. This
+# launcher never picks a paid or external backend for anyone; a run reaches Jev
+# only when the operator typed `--typed-mode jev` and named a key FILE.
 #
 # THE JOURNAL is on the shared event bus now, `$EVENTS_DIR/typryx.ndjson`,
 # not its own directory. @decided 2026-09-26: typryx's four event types
@@ -1601,10 +1771,12 @@ if [ "$WITH_TYPED" -eq 1 ]; then
   TYPRYX_DIR="$STACK_UP_HOME/typryx"
   mkdir -p "$TYPRYX_DIR"
 
-  # `stub` unless the operator exported another backend before calling this
-  # script (see the comment above); this launcher never picks one itself.
-  TYPRYX_BACKEND="${TYPRYX_BACKEND:-stub}"
+  # The backend comes from resolve_typed_mode, near the top of this file:
+  # --typed-mode's choice when one was made, otherwise `stub` unless the
+  # operator exported another before calling this script.
+  TYPRYX_BACKEND="$TYPED_BACKEND"
   log "starting typryx on :$TYPRYX_PORT ($TYPRYX_BACKEND backend, journal on the shared bus, ledger under $TYPRYX_DIR)"
+  log "typryx data: $TYPED_LEAVES"
   # TYPRYX_ACCEPT_KEY_IN_META: off in typryx by default. On here because the
   # broker started right below forwards a brokered call with only a
   # content-type header - no X-Typryx-Key, no agent identity of its own
@@ -1614,12 +1786,11 @@ if [ "$WITH_TYPED" -eq 1 ]; then
   # typryx (typryx#6).
   TYPRYX_ADDR="127.0.0.1:$TYPRYX_PORT" \
   TYPRYX_KEYS="$TYPRYX_SECRET=$TYPRYX_AGENT" \
-  TYPRYX_BACKEND="$TYPRYX_BACKEND" \
   TYPRYX_TEMPLATES="$TYPRYX_REPO/examples/templates" \
   TYPRYX_EVENTS="$EVENTS_DIR/typryx.ndjson" \
   TYPRYX_LEDGER_DIR="$TYPRYX_DIR/ledger" \
   TYPRYX_ACCEPT_KEY_IN_META="1" \
-    "$TYPRYX_BIN" > "$LOGS_DIR/typryx.log" 2>&1 &
+    env ${TYPRYX_ENV[@]+"${TYPRYX_ENV[@]}"} "$TYPRYX_BIN" > "$LOGS_DIR/typryx.log" 2>&1 &
   register typryx "$!" TERM
   wait_health typryx "$TYPRYX_PORT" "$!" "/healthz" || \
     warn "typryx did not come up; the rest of the stack is unaffected."
@@ -1992,6 +2163,7 @@ if [ "$WITH_TYPED" -eq 1 ]; then
   log "typryx:  http://127.0.0.1:$TYPRYX_PORT  (key: $TYPRYX_SECRET, $TYPRYX_BACKEND backend, minted fresh this run)"
   printf '  curl -s -X POST http://127.0.0.1:%s/v1/ask -H "X-Typryx-Key: %s" -H "Content-Type: application/json" -d '"'"'{"template":"eval.outcome_met","state":{"task":"2+2","final_answer":"4"}}'"'"'\n' \
     "$TYPRYX_PORT" "$TYPRYX_SECRET"
+  log "         data:    $TYPED_LEAVES"
   log "         journal: $EVENTS_DIR/typryx.ndjson (on the shared bus; trailryx-seal reads it and refuses it for unknown_schema, see below)   ledger: $TYPRYX_DIR/ledger"
   log "broker:  http://127.0.0.1:$BROKER_PORT/mcp  (key: $BROKER_SECRET, minted fresh this run, fronts typryx as upstream \"typryx\")"
   # x-fuse-agent-id, in the example itself, is not decoration: the broker's

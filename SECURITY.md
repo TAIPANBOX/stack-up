@@ -27,4 +27,4 @@ one is tagged.
 
 Every change passes the repository's gates before merge: `shellcheck up.sh
 down.sh routines.sh`, `bash -n` on all three, `scripts/loopback-only.sh`,
-`scripts/gateway-cache-is-off.sh` and `scripts/gates-have-teeth.sh`.
+`scripts/gateway-cache-is-off.sh`, `scripts/typed-mode.sh` and `scripts/gates-have-teeth.sh`.

@@ -32,6 +32,7 @@ bash -n up.sh && bash -n down.sh && bash -n routines.sh
 ./scripts/gateway-decides-its-upstream.sh
 ./scripts/gateway-cache-is-off.sh
 ./scripts/revoke-key-not-printed.sh
+./scripts/typed-mode.sh
 ./scripts/gates-have-teeth.sh   # invariant 6; needs a clean tree
 ```
 
@@ -197,6 +198,34 @@ building here and the thing that most often gets skipped.
    this launcher sets `TOKENFUSE_CACHE="off"` on every gateway start instead
    (tokenfuse#319).
    *(gate: `scripts/gateway-cache-is-off.sh`)*
+
+10. **Where typryx's data goes is chosen on purpose, refused before anything is
+    built, and the Jev key is a file this launcher never reads.**
+    `@decided 2026-09-30`: typed answers have three data modes and the
+    operator picks one. `--typed-mode jev` sends the named fields of each
+    question to TypeSafe AI's hosted API and needs `--typed-key-file`;
+    `--typed-mode own-model` points typryx at the operator's own
+    OpenAI-compatible server (`--typed-model-url` ending in `/v1`,
+    `--typed-model`, optional key file) so nothing leaves their hardware;
+    `--typed-mode off` starts nothing. No mode is picked for anyone: with no
+    `--typed-mode`, nothing starts, and `--with-typed` alone is the stub
+    backend with no environment change. A bad choice exits 2 at argument
+    parsing, before any build, probe or write (`--typed-plan` stops there and
+    prints what would start and what would leave the machine). The key is a
+    FILE: the launcher checks it is not blank with `grep -q`, hands typryx the
+    path in its environment, and never puts the bytes in a variable, an
+    argument or a log line. Under a chosen mode the other backend's variables
+    are removed from typryx's environment, so a stale exported
+    `TYPRYX_JEV_URL` cannot redirect the key. Not wired yet:
+    `TYPRYX_TRAINING_DIR` (typryx's opt-in local training log); it is not on
+    typryx's main branch, which is what this launcher builds.
+    *(gate: `scripts/typed-mode.sh`, 43 checks through `--typed-plan`, plus a
+    static check that up.sh never reads the key file; 10 cases in
+    `gates-have-teeth.sh`. What it does not cover: typryx actually running in
+    each mode, and the key staying out of the running process's arguments and
+    log. That half was shown by hand in the pull request that added this
+    invariant, not by a script, because it needs a built typryx and a free
+    port.)*
 
 An approved architecture decision is **not finished** until it is two things: a
 numbered invariant in this file, and a gate in a script if it can be checked

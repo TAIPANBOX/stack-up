@@ -87,12 +87,17 @@
         },
         "typryx_journal_joins_the_shared_bus": {
           "value": "$STACK_UP_HOME/events/typryx.ndjson; the ledger stays on its own path, $STACK_UP_HOME/typryx/ledger",
-          "why": "@decided 2026-09-26: agent-passport SPEC 6.2 (agent-passport#67) registers typryx's four event types (typed_answer, typed_unanswered, typed_refused, calibration_drift) in the estate's own event schema, so the earlier reason for keeping this journal off the shared bus (an unregistered source trailryx-seal's *.ndjson import would pick up blind) no longer holds. TYPRYX_BACKEND is always stub here: free, deterministic, no outbound call.",
+          "why": "@decided 2026-09-26: agent-passport SPEC 6.2 (agent-passport#67) registers typryx's four event types (typed_answer, typed_unanswered, typed_refused, calibration_drift) in the estate's own event schema, so the earlier reason for keeping this journal off the shared bus (an unregistered source trailryx-seal's *.ndjson import would pick up blind) no longer holds. TYPRYX_BACKEND is stub here unless the operator chose a data mode (see typed_data_mode_is_chosen_not_defaulted): free, deterministic, no outbound call.",
           "note": "@claude 2026-09-26: registered is not the same as sealed. typryx emits schema agent-event/v1.0, which trailryx-agentevent does not accept yet (it reads v0.1 through v0.3), so trailryx-seal refuses every line here for unknown_schema before it ever inspects the event type; measured 2026-09-26 against this launcher's own run. The practical outcome is the one roughly forty other unmapped or unrecognized event types already get on this bus: counted, not sealed. Moving the journal here only stops it being an unregistered source; it does not make trailryx seal it."
         },
         "tokenfuse_mcp_broker_fronts_typryx_by_configuration": {
           "value": "tokenfuse's own `mcp-broker` subcommand, TOKENFUSE_MCP_UPSTREAM(S) pointed at typryx's :4320/mcp",
           "why": "@decided 2026-09-26: tokenfuse's code is not changed for this. `up.sh` already builds the tokenfuse binary for the money plane; --with-typed reuses that same binary's `mcp-broker` subcommand and points it at typryx through its documented environment contract alone (TOKENFUSE_MCP_UPSTREAM(S), TOKENFUSE_MCP_KEYS, TOKENFUSE_MCP_SECRETS, TOKENFUSE_MCP_SECRET_SCOPES). A brokered call resolves its typryx credential from `params._meta` (typryx#6, TYPRYX_ACCEPT_KEY_IN_META=1 here) because the broker forwards a tools/call with no header of its own."
+        },
+        "typed_data_mode_is_chosen_not_defaulted": {
+          "value": "--typed-mode jev | own-model | off; unset keeps today's behaviour (nothing without --with-typed, the stub backend with it)",
+          "why": "@decided 2026-09-30: a customer chooses where typed-answer data goes. jev sends the named fields of each question to TypeSafe AI's hosted API and takes its key from a file named by --typed-key-file, never from an environment value; own-model points typryx at the customer's own OpenAI-compatible server (--typed-model-url ending in /v1, --typed-model, optional key file) so nothing leaves their hardware; off starts nothing. Refusals happen at argument parsing, before any build, and --typed-plan prints the resolved choice without starting anything. The launcher never reads the key file's bytes; typryx does.",
+          "note": "@claude 2026-09-30: TYPRYX_TRAINING_DIR, typryx's opt-in local training log, is not wired here. It is not on typryx's main branch (checked by grepping the typryx source this launcher builds), and this launcher builds from source at whatever it finds. Wire it once it is merged there."
         }
       }
     }

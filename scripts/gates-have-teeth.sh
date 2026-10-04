@@ -521,6 +521,26 @@ assert t != s
 open("up.sh", "w").write(t)')" \
 	"nowhere, so this measured nothing"
 
+# The two older gateway gates read their subjects through a here-document that
+# always delivers one line, so a launcher with no gateway start at all counted as
+# one start and their "measured nothing" refusal could never fire (found
+# reviewing the declassify key, 2026-10-04). Same edit as the case above.
+run_case "gateway-cache-is-off: no gateway start left to judge" fail \
+	'./scripts/gateway-cache-is-off.sh' \
+	"$(py 's = open("up.sh").read()
+t = s.replace("\"$GATEWAY_BIN\" > \"$LOGS_DIR/gateway.log\" 2>&1 &", "gateway_launcher > \"$LOGS_DIR/gateway.log\" 2>&1 &")
+assert t != s
+open("up.sh", "w").write(t)')" \
+	"nowhere, so this measured nothing"
+
+run_case "gateway-decides-its-upstream: no gateway start left to judge" fail \
+	'./scripts/gateway-decides-its-upstream.sh' \
+	"$(py 's = open("up.sh").read()
+t = s.replace("\"$GATEWAY_BIN\" > \"$LOGS_DIR/gateway.log\" 2>&1 &", "gateway_launcher > \"$LOGS_DIR/gateway.log\" 2>&1 &")
+assert t != s
+open("up.sh", "w").write(t)')" \
+	"nowhere, so nothing was measured"
+
 run_case "loopback-only: no launcher left to read" fail \
 	'./scripts/loopback-only.sh' \
 	"$(py 'import subprocess, os

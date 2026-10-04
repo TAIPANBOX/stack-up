@@ -198,7 +198,14 @@ building here and the thing that most often gets skipped.
    up to 10,000 cached entries computing cosine similarity, serving nothing;
    this launcher sets `TOKENFUSE_CACHE="off"` on every gateway start instead
    (tokenfuse#319).
-   *(gate: `scripts/gateway-cache-is-off.sh`)*
+   *(gate: `scripts/gateway-cache-is-off.sh`, teeth in
+   `scripts/gates-have-teeth.sh`, including a launcher with no gateway start at
+   all: until 2026-10-04 this gate and `gateway-decides-its-upstream.sh` read
+   their subjects through a here-document that always delivers one empty line,
+   so zero starts counted as one and their "measured nothing" refusal could
+   never fire. `@measured` both gateway launch lines renamed in a scratch copy,
+   2026-10-04: both gates exited 0 "(1 checked)" before the fix and exit 1
+   "measured nothing" after.)*
 
 10. **Where typryx's data goes is chosen on purpose, refused before anything is
     built, and the Jev key is a file this launcher never reads.**

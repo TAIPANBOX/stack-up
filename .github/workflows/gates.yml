@@ -45,6 +45,21 @@ jobs:
       - name: the typed-answers data mode is chosen, refused early, and the key file is never read
         run: ./scripts/typed-mode.sh
 
+      - name: every gateway start sets the run-budget ceiling, and the flag refuses what the gateway refuses
+        run: ./scripts/run-budget-ceiling-is-set.sh
+
+      - name: every stream file is one the readers accept as the source it carries
+        run: ./scripts/bus-files-match-sources.sh
+
+      - name: the chain-verify routine never calls a standing break ok
+        run: ./scripts/chain-verify-routine.sh
+
+      - name: components.json says what this launcher installs
+        run: ./scripts/manifest-is-true.sh
+
+      - name: every scenario is bound to a case that exists
+        run: ./scripts/features-are-bound.sh
+
       # Last, because it mutates tracked files and restores them. It needs a
       # clean tree and says so plainly, so it also reports any earlier step
       # that starts writing into the checkout.

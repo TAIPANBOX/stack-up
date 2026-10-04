@@ -25,7 +25,7 @@
 #                       ~/.stack-up/events/scopyx.ndjson, and the alert it
 #                       raised in ~/.stack-up/mail.txt
 #
-# It also installs the four tools that are NOT servers, because "bring it up"
+# It also installs the five tools that are NOT servers, because "bring it up"
 # cannot mean "start a daemon" for a thing that runs once and exits. For these,
 # up means: the executable is where the rest of the stack looks for it, and its
 # store exists. They are installed, not started:
@@ -34,6 +34,11 @@
 #   mockryx             fire drills (fires at a gateway on demand)
 #   engram-mcp          agent memory over ~/.taipan/engram.engram (stdio MCP)
 #   verdryx             output quality over ~/.taipan/verdryx.db
+#   agent-conform       the on-box chain verifier: `agent-conform watch-dir`
+#                       over ~/.stack-up/events, run by the `chain-verify`
+#                       routine (routines.sh), writes only its own
+#                       agent-conform.ndjson (a chain_broken alert on the bus)
+#                       and a state file under ~/.stack-up/routines
 #
 # After the demo above has run, it also seals a record of what every plane
 # did, because "bring it up" for a governed stack ought to end with something
@@ -55,7 +60,7 @@
 #   --with demo-fleet   seed a richer, labeled-as-demo fleet (a dozen-plus
 #                       agents, cache/router savings, a budget breach, a caught
 #                       runaway) into cloud instead of the short seed above
-#   --no-tools          skip the four installed-not-started tools above
+#   --no-tools          skip the five installed-not-started tools above
 #   --no-notify         skip heraldyx, the notifier. It sends no mail here in
 #                       any case: on this launcher it is pinned to file mode
 #                       and writes what it WOULD send to
@@ -119,10 +124,32 @@
 #                       to the ledger. The log stays on this machine; it holds
 #                       the question fields a template lets through and never a
 #                       backend's answer. README.md shows the export.
-#   --typed-plan        resolve the typed-answers choice, print what would start
-#                       and what would leave this machine (paths, never key
+#   --typed-risk-signal also run `typryx wardryx-proxy` and point the MCP
+#                       broker (and only the broker) at it, so a brokered tool
+#                       call reaches wardryx with typryx's risk answer attached
+#                       as a signal a `hold_if_signal` policy can read. Off
+#                       unless given; refused (exit 2) unless typryx is going to
+#                       run (--with-typed, or --typed-mode jev or own-model)
+#                       and wardryx is (not --only money). Each brokered call
+#                       costs one ask of the SAME backend, and under jev that
+#                       sends the call's tool name, arguments and target to
+#                       TypeSafe AI: --typed-plan says so before anything
+#                       starts. No policy is seeded; README.md has an example.
+#   --run-budget-ceiling <usd>
+#                       the most any ONE run may be granted when its budget
+#                       comes from the caller's header, a policy default or the
+#                       built-in default: sets the gateway's
+#                       TOKENFUSE_MAX_RUN_BUDGET_USD. Default 5.00, which is
+#                       tokenfuse's own default budget, so an ordinary run is
+#                       unchanged and only a larger caller-declared budget is
+#                       clamped. A positive decimal, at most six decimals;
+#                       anything else exits 2 before anything is built. Needs a
+#                       gateway built from tokenfuse v1.5.0 or newer.
+#   --plan              resolve every choice above, print what would start and
+#                       what would leave this machine (paths, never key
 #                       contents), and exit before building or starting
 #                       anything. A bad choice is refused here, exit 2.
+#   --typed-plan        the same thing, under its first name
 #   --force-install     replace binaries another tool installed (default: leave
 #                       them alone and use them as they are)
 #   --workspace <dir>   look here for sibling checkouts before cloning
@@ -215,6 +242,10 @@ TYPRYX_PORT=4320
 # the --with-typed block below), and this is the address tokenfuse's own
 # tooling already expects when nothing overrides it.
 BROKER_PORT=4200
+# typryx's own default for TYPRYX_PROXY_ADDR (typryx cmd/typryx/wardryxproxy.go),
+# reused rather than picked here. The proxy only ever starts under
+# --typed-risk-signal, between the MCP broker and wardryx.
+TYPRYX_PROXY_PORT=4330
 
 # --------------------------------------------------------------------------
 # Options
@@ -238,6 +269,16 @@ TYPED_MODEL_URL=""
 TYPED_MODEL=""
 TYPED_PLAN=0
 TYPED_TRAINING=0
+# The typed risk signal (see resolve_typed_mode below): off unless asked for.
+TYPED_RISK_SIGNAL=0
+# The most any one run may be granted, handed to the gateway as
+# TOKENFUSE_MAX_RUN_BUDGET_USD (tokenfuse invariant 73). 5.00 is tokenfuse's own
+# DEFAULT_RUN_BUDGET, so with no flag an ordinary run is exactly what it was and
+# only a caller-declared larger budget is clamped. ASKED records whether the
+# operator typed the flag, because a gateway too old to read the variable is a
+# warning for the default and a refusal for a figure somebody chose.
+RUN_BUDGET_CEILING_USD="5.00"
+RUN_BUDGET_CEILING_ASKED=0
 FORCE_INSTALL=0
 WORKSPACE="${STACK_UP_WORKSPACE:-$(dirname "$SCRIPT_DIR")}"
 
@@ -275,7 +316,10 @@ while [ $# -gt 0 ]; do
     --typed-model) shift; TYPED_MODEL="${1:-}"; [ -n "$TYPED_MODEL" ] || { echo "stack-up: --typed-model needs a model name" >&2; exit 2; } ;;
     --typed-model=*) TYPED_MODEL="${1#--typed-model=}"; [ -n "$TYPED_MODEL" ] || { echo "stack-up: --typed-model needs a model name" >&2; exit 2; } ;;
     --typed-training) TYPED_TRAINING=1 ;;
-    --typed-plan) TYPED_PLAN=1 ;;
+    --typed-risk-signal) TYPED_RISK_SIGNAL=1 ;;
+    --run-budget-ceiling) shift; RUN_BUDGET_CEILING_USD="${1:-}"; RUN_BUDGET_CEILING_ASKED=1 ;;
+    --run-budget-ceiling=*) RUN_BUDGET_CEILING_USD="${1#--run-budget-ceiling=}"; RUN_BUDGET_CEILING_ASKED=1 ;;
+    --typed-plan|--plan) TYPED_PLAN=1 ;;
     --force-install) FORCE_INSTALL=1 ;;
     --workspace) shift; WORKSPACE="${1:-}"; [ -n "$WORKSPACE" ] || { echo "stack-up: --workspace needs a directory" >&2; exit 2; } ;;
     -h|--help) usage; exit 0 ;;
@@ -323,7 +367,9 @@ done
 
 TYPED_BACKEND=""
 TYPED_LEAVES=""
+TYPED_RISK_LEAVES=""
 TYPRYX_ENV=()
+TYPRYX_PROXY_ENV=()
 # typryx's own state directory under this launcher's, and the two places in it
 # the launch and the plan must agree on.
 TYPED_STATE_DIR="$STACK_UP_HOME/typryx"
@@ -437,6 +483,44 @@ resolve_typed_mode() {
     [ "$WITH_TYPED" -eq 1 ] || typed_refuse "--typed-training needs typryx to run: add --with-typed, or choose --typed-mode jev or own-model"
     TYPRYX_ENV+=("TYPRYX_TRAINING_DIR=$TYPED_TRAINING_DIR")
   fi
+
+  # The typed risk signal: typryx's answer to "how risky is this tool call"
+  # put in front of wardryx. It needs a typryx to ask and a wardryx to ask it
+  # for, and it is refused here, at argument parsing, when either is off.
+  if [ "$TYPED_RISK_SIGNAL" -eq 1 ]; then
+    [ "$TYPED_MODE" != off ] || typed_refuse "--typed-risk-signal and --typed-mode off contradict each other: off starts no typryx, so there is nothing to give wardryx a signal"
+    [ "$WITH_TYPED" -eq 1 ] || typed_refuse "--typed-risk-signal needs typryx to run: add --with-typed, or choose --typed-mode jev or own-model"
+    [ "$ONLY_MONEY" -eq 0 ] || typed_refuse "--typed-risk-signal needs wardryx, and --only money does not start it"
+    # Which data leaves with it. The proxy asks the SAME backend the service
+    # uses, about every brokered call's tool name, arguments and target, so
+    # a mode that sends fields to a hosted API sends these too, and the plan
+    # must say so before anything starts.
+    case "$TYPED_BACKEND" in
+      stub)            TYPED_RISK_LEAVES="nothing: the stub backend makes no outbound call (and its probabilities carry no information, so a hold_if_signal rule over them holds on nothing real)" ;;
+      jev)             TYPED_RISK_LEAVES="the tool name, the arguments and the target of EVERY brokered tool call go to TypeSafe AI's hosted Jev API, one ask per call (typryx's template allowlist: tool, arguments, target, nothing else)" ;;
+      openai-logprobs) TYPED_RISK_LEAVES="the tool name, the arguments and the target of every brokered tool call go to the model server you named, $TYPED_MODEL_URL, one ask per call; nothing goes to TypeSafe or anyone else" ;;
+      *)               TYPED_RISK_LEAVES="whatever the TYPRYX_BACKEND you exported does with the tool name, arguments and target of every brokered tool call; this launcher did not choose it" ;;
+    esac
+    # The proxy's own environment: the same backend settings the service gets
+    # (TYPRYX_ENV, so a chosen mode reaches it and a stale exported variable
+    # cannot redirect it), minus everything that would make it a second
+    # writer of the service's files. No journal and no ledger: the journal is
+    # one hash-chained file on the bus with one writer, and a second process
+    # appending to it breaks the chain agent-conform now verifies; a
+    # differently named journal would be a stream no reader accepts as typryx's.
+    # No training log either: it would copy every tool call's arguments into
+    # it. No keys: the broker cannot add an X-Typryx-Key header, and a
+    # loopback bind needs none (typryx refuses a wide bind without them).
+    # Every `-u` first, then the assignments, the same ordering rule as above.
+    TYPRYX_PROXY_ENV=(-u TYPRYX_EVENTS -u TYPRYX_LEDGER_DIR -u TYPRYX_KEYS -u TYPRYX_TRAINING_DIR
+      -u TYPRYX_ALLOW_OPEN_BIND -u TYPRYX_PROXY_ASK_TIMEOUT_MS)
+    local e
+    for e in ${TYPRYX_ENV[@]+"${TYPRYX_ENV[@]}"}; do
+      case "$e" in TYPRYX_TRAINING_DIR=*) continue ;; esac
+      TYPRYX_PROXY_ENV+=("$e")
+    done
+    TYPRYX_PROXY_ENV+=("TYPRYX_PROXY_TEMPLATE=action.risk_class")
+  fi
 }
 
 print_typed_plan() {
@@ -466,10 +550,50 @@ print_typed_plan() {
       printf 'typed: env: %s\n' "$e"
     fi
   done
+  if [ "$TYPED_RISK_SIGNAL" -eq 1 ]; then
+    printf 'typed: risk signal: on (opt-in): typryx wardryx-proxy on 127.0.0.1:%s in front of wardryx; only the MCP broker is pointed at it, the LLM gateway keeps talking to wardryx directly\n' "$TYPRYX_PROXY_PORT"
+    printf 'typed: risk signal leaves this machine: %s\n' "$TYPED_RISK_LEAVES"
+    printf 'typed: risk signal cost: one ask of that backend per eligible brokered call, capped by the proxy'"'"'s own TYPRYX_MAX_CALLS_PER_HOUR (typryx default 1000, separate from the service'"'"'s)\n'
+    printf 'typed: risk signal policy: none is seeded; a hold_if_signal rule is yours to write (README.md has an example)\n'
+    unset_next=0
+    for e in "${TYPRYX_PROXY_ENV[@]}"; do
+      if [ "$unset_next" -eq 1 ]; then
+        printf 'typed: proxy env: -u %s\n' "$e"; unset_next=0
+      elif [ "$e" = "-u" ]; then
+        unset_next=1
+      else
+        printf 'typed: proxy env: %s\n' "$e"
+      fi
+    done
+  elif [ "$WITH_TYPED" -eq 1 ]; then
+    printf 'typed: risk signal: off (the broker reaches no policy plane; --typed-risk-signal turns it on)\n'
+  fi
 }
 
+# resolve_run_budget_ceiling - refuse a ceiling the gateway would refuse, here,
+# before anything is built. tokenfuse reads TOKENFUSE_MAX_RUN_BUDGET_USD as exact
+# microdollars and exits 2 at start on anything but a positive decimal with at
+# most six places (measured 2026-10-04 against a v1.5.0 gateway: `0`, `0.00`,
+# `.5`, `5.`, `+5`, `1e9`, `abc` and 9223372036854.775808 all exit 2; `5`,
+# `005`, `0.000001`, 9223372036854.775807 start). Twelve integer digits stay
+# inside that range, and a gateway that dies at "did not come up" after a
+# multi-minute build is the failure this check exists to move to millisecond 0.
+resolve_run_budget_ceiling() {
+  if [[ "$RUN_BUDGET_CEILING_USD" =~ ^[0-9]{1,12}(\.[0-9]{1,6})?$ ]] && [[ "$RUN_BUDGET_CEILING_USD" =~ [1-9] ]]; then
+    return 0
+  fi
+  echo "stack-up: --run-budget-ceiling takes a positive number of US dollars with at most six decimals, for example 5.00 (got '$RUN_BUDGET_CEILING_USD')" >&2
+  exit 2
+}
+
+print_launch_plan() {
+  printf 'launch: gateway run-budget ceiling: %s USD per run (TOKENFUSE_MAX_RUN_BUDGET_USD; a budget that comes from the caller, a policy default or the built-in default is clamped to it, a Cloud budget is not)\n' "$RUN_BUDGET_CEILING_USD"
+}
+
+resolve_run_budget_ceiling
 resolve_typed_mode
 if [ "$TYPED_PLAN" -eq 1 ]; then
+  print_launch_plan
   print_typed_plan
   exit 0
 fi
@@ -1089,7 +1213,7 @@ WANT_PY_TOOLS=1
 if [ "$ONLY_MONEY" -eq 1 ] || [ "$NO_TOOLS" -eq 1 ]; then
   WANT_GO_TOOLS=0; WANT_PY_TOOLS=0
 else
-  have go || { warn "go not found: skipping qryx + mockryx (they are written in Go)."; WANT_GO_TOOLS=0; }
+  have go || { warn "go not found: skipping qryx, mockryx and agent-conform (they are written in Go)."; WANT_GO_TOOLS=0; }
   have python3 || { warn "python3 not found: skipping engram + verdryx (they are written in Python)."; WANT_PY_TOOLS=0; }
 fi
 
@@ -1107,6 +1231,17 @@ fi
 if [ "$WANT_IDENTITY" -eq 1 ] && port_busy "$IDRYX_PORT"; then
   warn "port $IDRYX_PORT is busy: skipping idryx."
   WANT_IDENTITY=0
+fi
+
+# --typed-risk-signal was asked for by name, so what it needs is a refusal here
+# and not a quiet drop to a smaller stack like the optional planes: no wardryx
+# (no Go, or its port taken) leaves the proxy nothing to sit in front of, and a
+# taken proxy port would make the broker's wardryx URL point at somebody else.
+if [ "$TYPED_RISK_SIGNAL" -eq 1 ]; then
+  [ "$WANT_POLICY" -eq 1 ] \
+    || die "--typed-risk-signal needs wardryx, and wardryx is not going to run (no Go toolchain, or port $WARDRYX_PORT is busy; see the warning above)."
+  port_busy "$TYPRYX_PROXY_PORT" \
+    && die "port $TYPRYX_PROXY_PORT (typryx wardryx-proxy) is already in use."
 fi
 
 mkdir -p "$EVENTS_DIR" "$LOGS_DIR" "$PIDS_DIR" "$REPOS_DIR" "$MARKERS_DIR" "$BUILD_DIR"
@@ -1158,6 +1293,24 @@ else
   install_binary tokenfuse-gateway "$TF_REPO/target/release/tokenfuse" || die "could not install the gateway binary."
   install_binary tokenfuse-cloud "$TF_REPO/target/release/tokenfuse-cloud" || die "could not install the cloud binary."
   : > "$MARKERS_DIR/.marker-tokenfuse"
+fi
+
+# A binary that is not part of this launcher's own build can be older than the
+# settings it is about to be handed (a gateway another tool installed, built
+# before tokenfuse v1.5.0). An older gateway ignores TOKENFUSE_MAX_RUN_BUDGET_USD
+# without a word, which is exactly a ceiling that looks set and is not. Judged by
+# the setting's name being in the binary, the same way for the gateway here and
+# for typryx's proxy below, so nothing is executed to ask.
+# bin_reads_setting <binary> <NAME> -> 0 if the binary carries that setting's name.
+bin_reads_setting() {
+  [ -f "$1" ] && grep -qa -- "$2" "$1" 2>/dev/null
+}
+
+if ! bin_reads_setting "$GATEWAY_BIN" TOKENFUSE_MAX_RUN_BUDGET_USD; then
+  if [ "$RUN_BUDGET_CEILING_ASKED" -eq 1 ]; then
+    die "--run-budget-ceiling needs a gateway built from tokenfuse v1.5.0 or newer, and $GATEWAY_BIN does not read TOKENFUSE_MAX_RUN_BUDGET_USD, so the ceiling would be ignored. Update the tokenfuse checkout ($TF_REPO) and run again with --force-install if another tool installed it."
+  fi
+  warn "the gateway at $GATEWAY_BIN predates tokenfuse v1.5.0 and ignores TOKENFUSE_MAX_RUN_BUDGET_USD: a caller still chooses its own per-run budget. Update the tokenfuse checkout ($TF_REPO) and run with --force-install to get the $RUN_BUDGET_CEILING_USD USD ceiling."
 fi
 
 # Prepare wardryx wiring before the gateway starts, so the gateway can consult
@@ -1374,7 +1527,19 @@ GATEWAY_DECLASSIFY_KEY="$(rand_hex 24)"
 [ -n "$GATEWAY_DECLASSIFY_KEY" ] \
   || die "could not mint the gateway's declassify key (no openssl, and /dev/urandom gave nothing); refusing to start a gateway whose declassify endpoint would be open."
 
-log "starting gateway on :$GATEWAY_PORT (enforce, stub upstream, reporting to the cloud)"
+# TOKENFUSE_MAX_RUN_BUDGET_USD (tokenfuse v1.5.0, invariant 73): the operator's
+# ceiling on the budget one run may be granted. A run's budget comes from the
+# header the AGENT sends (x-fuse-budget-usd), from a policy default or from the
+# built-in USD 5, and the next call of an open run could widen it, so with no
+# ceiling the per-run limit is whatever the caller says. Set on EVERY gateway
+# start below, from RUN_BUDGET_CEILING_USD (default 5.00, or --run-budget-ceiling).
+# @claude 2026-10-04: the default equals tokenfuse's own DEFAULT_RUN_BUDGET, so an
+# ordinary run is unchanged and only a caller-declared larger budget is clamped.
+# NOT the Cloud's budget: a budget that comes from the Cloud is the operator's own
+# word and tokenfuse never clamps it. NOT the mcp-broker below: it holds no run
+# budget. One figure per run, not per agent: an agent that opens a new run id gets
+# a new ceiling's worth. scripts/run-budget-ceiling-is-set.sh holds the starts.
+log "starting gateway on :$GATEWAY_PORT (enforce, stub upstream, run budget ceiling $RUN_BUDGET_CEILING_USD USD, reporting to the cloud)"
 if [ -n "$WARDRYX_URL" ]; then
   # ${a[@]+"${a[@]}"} and not "${a[@]}": under `set -u` bash 3.2, which is what
   # /usr/bin/env bash resolves to on macOS, an empty array expansion is an
@@ -1392,6 +1557,7 @@ if [ -n "$WARDRYX_URL" ]; then
   TOKENFUSE_DECLASSIFY_KEY="$GATEWAY_DECLASSIFY_KEY" \
   env ${DELEG_ENV[@]+"${DELEG_ENV[@]}"} \
   TOKENFUSE_ADDR="127.0.0.1:$GATEWAY_PORT" \
+  TOKENFUSE_MAX_RUN_BUDGET_USD="$RUN_BUDGET_CEILING_USD" \
   TOKENFUSE_ALLOW_STUB="1" \
   TOKENFUSE_MODE="enforce" \
   TOKENFUSE_CACHE="off" \
@@ -1421,6 +1587,7 @@ else
   TOKENFUSE_DECLASSIFY_KEY="$GATEWAY_DECLASSIFY_KEY" \
   env ${DELEG_ENV[@]+"${DELEG_ENV[@]}"} \
   TOKENFUSE_ADDR="127.0.0.1:$GATEWAY_PORT" \
+  TOKENFUSE_MAX_RUN_BUDGET_USD="$RUN_BUDGET_CEILING_USD" \
   TOKENFUSE_ALLOW_STUB="1" \
   TOKENFUSE_MODE="enforce" \
   TOKENFUSE_CACHE="off" \
@@ -1932,9 +2099,79 @@ fi
 # gateway's ($EVENTS_FILE, tokenfuse.ndjson): two independent process
 # invocations writing one file would interleave two writers' lines with
 # nothing in the record to tell them apart.
+# --------------------------------------------------------------------------
+# The typed risk signal (--typed-risk-signal): typryx's answer in front of
+# wardryx, for the MCP broker only.
+#
+# `typryx wardryx-proxy` (typryx v0.4.0, typryx#17) is a reverse proxy between a
+# caller and wardryx. It forwards everything unchanged; the one exception is a
+# POST /v1/decide that carries the `tool_call` tokenfuse v1.5.0's broker now
+# sends (tokenfuse#353), for which it asks typryx in-process "what risk class is
+# this call" and appends the answer as one `signals` entry. wardryx v1.2.0 reads
+# it through a `hold_if_signal` policy rule (wardryx#81), which can turn an allow
+# into a hold and nothing else. No such rule is seeded here: a policy that holds
+# calls is the operator's to write, and README.md shows one.
+#
+# WHO IS POINTED AT IT. Only the broker (BROKER_WARDRYX_ENV, below). The LLM
+# gateway keeps talking to wardryx directly, on the estate audit's reasoning
+# (J2-DESIGN.md, 2026-10-04): on the model path there is no pending tool call to
+# classify (tools are only offered), and a hosted backend's median latency would
+# push most decisions past the gateway's own decision timeout, which under its
+# fail-closed mode refuses them. The signal is about a tool call, and only the
+# broker sends one. The proxy binds
+# loopback like everything here; "only the broker can reach it" is as strong as
+# loopback is on this machine, which is to say any local process can, and it
+# carries no key because the broker cannot add an X-Typryx-Key header and typryx
+# refuses a wide bind without one, so widening the bind is refused too.
+#
+# NO JOURNAL, NO LEDGER, NO KEYS, NO TRAINING LOG for the proxy (see
+# TYPRYX_PROXY_ENV, resolve_typed_mode): it would be a second writer of files
+# the service owns. The answer's id travels in the signal into wardryx's own
+# decision record instead.
+BROKER_WARDRYX_ENV=()
+if [ "$TYPED_RISK_SIGNAL" -eq 1 ]; then
+  [ "$WITH_TYPED" -eq 1 ] \
+    || die "--typed-risk-signal needs typryx, and typryx did not come up (see the warning above); refusing to start a broker whose policy plane would carry no signal."
+  # A typryx older than v0.4.0 has no `wardryx-proxy` subcommand, and one whose
+  # checkout lacks the starter template has nothing to ask. Both are refused
+  # now, naming what to update, rather than at a proxy that exits at start.
+  bin_reads_setting "$TYPRYX_BIN" TYPRYX_PROXY_UPSTREAM \
+    || die "--typed-risk-signal needs typryx v0.4.0 or newer, and $TYPRYX_BIN has no wardryx-proxy. Update the typryx checkout ($TYPRYX_REPO) and run again with --force-install if another tool installed it."
+  [ -f "$TYPRYX_REPO/examples/templates/action.risk_class.json" ] \
+    || die "--typed-risk-signal needs typryx's action.risk_class template, and $TYPRYX_REPO/examples/templates has none. Update the typryx checkout ($TYPRYX_REPO)."
+  log "starting typryx wardryx-proxy on :$TYPRYX_PROXY_PORT (in front of wardryx on :$WARDRYX_PORT; the broker only)"
+  log "typryx risk signal data: $TYPED_RISK_LEAVES"
+  TYPRYX_PROXY_ADDR="127.0.0.1:$TYPRYX_PROXY_PORT" \
+  TYPRYX_PROXY_UPSTREAM="http://127.0.0.1:$WARDRYX_PORT" \
+  TYPRYX_TEMPLATES="$TYPRYX_REPO/examples/templates" \
+    env ${TYPRYX_PROXY_ENV[@]+"${TYPRYX_PROXY_ENV[@]}"} "$TYPRYX_BIN" wardryx-proxy > "$LOGS_DIR/typryx-wardryx-proxy.log" 2>&1 &
+  register typryx-wardryx-proxy "$!" TERM
+  # /healthz is forwarded to wardryx like every other request, so a 200 here is
+  # the proxy up AND wardryx answering through it.
+  wait_health typryx-wardryx-proxy "$TYPRYX_PROXY_PORT" "$!" "/healthz" \
+    || die "typryx wardryx-proxy did not come up (see $LOGS_DIR/typryx-wardryx-proxy.log); refusing to point the broker at it."
+  # The broker's policy gate is OFF unless TOKENFUSE_WARDRYX_MODE and _URL are
+  # both set (tokenfuse docs/23-mcp-broker-v2.md section 2), so pointing the URL
+  # alone would change nothing. enforce, the same mode the gateway runs in here,
+  # so a hold_if_signal hold refuses the call instead of annotating it; with no
+  # such rule and no policy matching the broker's agent, every call is allowed
+  # as before. enforce also means a call with no x-fuse-agent-id is refused 400
+  # identity_required, which the example this run prints already carries.
+  BROKER_WARDRYX_ENV=(
+    "TOKENFUSE_WARDRYX_MODE=enforce"
+    "TOKENFUSE_WARDRYX_URL=http://127.0.0.1:$TYPRYX_PROXY_PORT"
+    "TOKENFUSE_WARDRYX_KEY=devkey"
+    "TOKENFUSE_WARDRYX_TIMEOUT_MS=2000"
+  )
+fi
+
 if [ "$WITH_TYPED" -eq 1 ]; then
   BROKER_SECRET="$( set +o pipefail; LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 40 )"
   log "starting tokenfuse-mcp-broker on :$BROKER_PORT (fronting typryx on :$TYPRYX_PORT)"
+  # env ${BROKER_WARDRYX_ENV[@]+...} on its own line, the way the gateway's
+  # starts carry DELEG_ENV: the secrets above it stay prefix assignments (never
+  # an argument to env), and the launch line stays `"$GATEWAY_BIN" mcp-broker`
+  # at the command position, which is what the gateway gates exclude it by.
   TOKENFUSE_MCP_ADDR="127.0.0.1:$BROKER_PORT" \
   TOKENFUSE_MCP_UPSTREAM="http://127.0.0.1:$TYPRYX_PORT/mcp" \
   TOKENFUSE_MCP_UPSTREAMS="typryx=http://127.0.0.1:$TYPRYX_PORT/mcp" \
@@ -1942,6 +2179,7 @@ if [ "$WITH_TYPED" -eq 1 ]; then
   TOKENFUSE_MCP_SECRETS="typryx_key=$TYPRYX_SECRET" \
   TOKENFUSE_MCP_SECRET_SCOPES="typryx_key=tools:ask|ask_freeform|list_questions" \
   TOKENFUSE_EVENTS_PATH="$EVENTS_DIR/tokenfuse-mcp.ndjson" \
+  env ${BROKER_WARDRYX_ENV[@]+"${BROKER_WARDRYX_ENV[@]}"} \
     "$GATEWAY_BIN" mcp-broker > "$LOGS_DIR/tokenfuse-mcp-broker.log" 2>&1 &
   register tokenfuse-mcp-broker "$!" TERM
   wait_health tokenfuse-mcp-broker "$BROKER_PORT" "$!" "/healthz" || \
@@ -1966,17 +2204,31 @@ fi
 TOOLS_INSTALLED=()
 
 # install_go_tool <name> [alt-repo-casing...] - build ./cmd/<name> and install.
+#
+# The tool's repository is its own name, with one exception: agent-conform is
+# one command of agent-stack-go, the shared contract module, so its repository
+# is agent-stack-go and its build also depends on that module's library
+# directories (chain, event, delegation, passport), which a change in must
+# rebuild it, not just a change under cmd/.
 install_go_tool() {
   local name="$1"; shift
-  local repo
-  repo="$(locate_repo "$name" "$@")" || { warn "could not fetch $name; skipping it."; return 1; }
+  local repo repo_name="$name"
+  local watch=()
+  case "$name" in
+    agent-conform) repo_name="agent-stack-go" ;;
+  esac
+  repo="$(locate_repo "$repo_name" "$@")" || { warn "could not fetch $name; skipping it."; return 1; }
+  watch=("$repo/cmd" "$repo/internal" "$repo/go.mod")
+  case "$name" in
+    agent-conform) watch+=("$repo/chain" "$repo/event" "$repo/delegation" "$repo/passport") ;;
+  esac
   migrate_legacy "$name"
   if foreign_binary "$name"; then
     log "$name: already installed by another tool; using $BIN_DIR/$name"
     TOOLS_INSTALLED+=("$name"); return 0
   fi
   if installed_by_us "$name" \
-     && ! stale_paths "$MARKERS_DIR/.marker-$name" "$repo/cmd" "$repo/internal" "$repo/go.mod"; then
+     && ! stale_paths "$MARKERS_DIR/.marker-$name" "${watch[@]}"; then
     log "$name: up to date, skipping build"
     TOOLS_INSTALLED+=("$name"); return 0
   fi
@@ -2058,6 +2310,12 @@ if [ "$WANT_GO_TOOLS" -eq 1 ]; then
   # build, which is slow but automatic (GOTOOLCHAIN=auto is the default).
   install_go_tool qryx Qryx
   install_go_tool mockryx Mockryx
+  # The on-box chain verifier (agent-stack-go v1.1.0, agent-stack-go#66). Not a
+  # server: routines.sh's `chain-verify` runs `agent-conform watch-dir` over
+  # $EVENTS_DIR and it appends one chain_broken event per NEW break to its own
+  # agent-conform.ndjson there, which heraldyx already reads. Skipped with the
+  # other tools by --no-tools and --only money.
+  install_go_tool agent-conform
 fi
 
 if [ "$WANT_PY_TOOLS" -eq 1 ]; then
@@ -2237,6 +2495,7 @@ if [ "${#TOOLS_INSTALLED[@]}" -gt 0 ]; then
     case "$t" in
       qryx)       printf '  %s scan <path>\n' "$BIN_DIR/qryx" ;;
       mockryx)    printf '  %s run --gateway http://127.0.0.1:%s\n' "$BIN_DIR/mockryx" "$GATEWAY_PORT" ;;
+      agent-conform) printf '  %s watch-dir -out %s/agent-conform.ndjson -state %s/routines/agent-conform.state.json %s   # or ./routines.sh run chain-verify\n' "$BIN_DIR/agent-conform" "$EVENTS_DIR" "$STACK_UP_HOME" "$EVENTS_DIR" ;;
       engram-mcp) printf '  %s --db %s        # an agent speaks MCP to this over stdio\n' "$BIN_DIR/engram-mcp" "$ENGRAM_DB" ;;
       verdryx)    printf '  VERDRYX_DB=%s %s eval --help\n' "$VERDRYX_DB" "$BIN_DIR/verdryx" ;;
     esac
@@ -2253,6 +2512,7 @@ fi
 echo
 log "events:  $EVENTS_DIR"
 log "logs:    $LOGS_DIR"
+log "budget:  the gateway clamps any one run's budget to $RUN_BUDGET_CEILING_USD USD when it comes from the caller, a policy default or the built-in default (--run-budget-ceiling; a Cloud budget is not clamped)"
 log "declassify: POST http://127.0.0.1:$GATEWAY_PORT/v1/fuse/declassify clears a run's taint label and needs the header"
 log "         x-fuse-declassify-key: $GATEWAY_DECLASSIFY_KEY   (minted fresh this run, held in the gateway's environment only)"
 if [ "$WITH_DELEGATION" -eq 1 ]; then
@@ -2286,6 +2546,11 @@ if [ "$WITH_TYPED" -eq 1 ]; then
   printf '  curl -s -X POST http://127.0.0.1:%s/mcp -H "x-fuse-key: %s" -H "X-Fuse-Mcp-Upstream: typryx" -H "x-fuse-agent-id: agent://%s/mcp-broker-demo" -H "Content-Type: application/json" -d '"'"'{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ask","arguments":{"template":"eval.outcome_met","state":{"task":"2+2","final_answer":"4"}},"_meta":{"typryx/key":"{{secret:typryx_key}}"}}}'"'"'\n' \
     "$BROKER_PORT" "$BROKER_SECRET" "$DEMO_TRUST_DOMAIN"
   log "         its own events: $EVENTS_DIR/tokenfuse-mcp.ndjson (needs x-fuse-agent-id above or the call is served but the record is skipped, unattributed)"
+  if [ "$TYPED_RISK_SIGNAL" -eq 1 ]; then
+    log "risk:    typryx wardryx-proxy on http://127.0.0.1:$TYPRYX_PROXY_PORT in front of wardryx; ONLY the broker is pointed at it (the gateway talks to wardryx directly)"
+    log "         data:    $TYPED_RISK_LEAVES"
+    log "         no policy is seeded: a brokered call carries typryx's action.risk_class answer to wardryx, and a hold_if_signal rule you write decides whether it holds (README.md)"
+  fi
 fi
 if [ "$WANT_RECORDS" -eq 1 ]; then
   echo

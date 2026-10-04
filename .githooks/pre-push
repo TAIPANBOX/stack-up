@@ -39,6 +39,11 @@ step "gateway semantic cache off" "./scripts/gateway-cache-is-off.sh"
 step "gateway declassify key per run" "./scripts/declassify-is-keyed.sh"
 step "revocation key not logged" "./scripts/revoke-key-not-printed.sh"
 step "typed-answers data mode" "./scripts/typed-mode.sh"
+step "gateway run-budget ceiling" "./scripts/run-budget-ceiling-is-set.sh"
+step "bus file names match sources" "./scripts/bus-files-match-sources.sh"
+step "chain-verify routine" "./scripts/chain-verify-routine.sh"
+step "components.json is true" "./scripts/manifest-is-true.sh"
+step "features are bound" "./scripts/features-are-bound.sh"
 
 echo
 if [ "$fail" -ne 0 ]; then

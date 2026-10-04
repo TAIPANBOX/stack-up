@@ -2,8 +2,8 @@
 # declassify endpoint lifts a run's taint label and its credential is optional,
 # so a launcher that sets none leaves the endpoint open to anything that reaches
 # the gateway port. Scenarios are bound to cases in scripts/gates-have-teeth.sh
-# by name; this repository has no runner and no binding gate, so the binding is
-# by eye, as in stack-k8s's features/.
+# by name, and scripts/features-are-bound.sh holds the binding both ways (it was
+# by eye until 2026-10-04).
 Feature: the gateway's declassify key is minted per run and reaches the gateway through its environment only
 
   POST /v1/fuse/declassify takes a run's taint label off after a person

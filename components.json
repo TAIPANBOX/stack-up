@@ -48,6 +48,7 @@
           "scopyx",
           "tokenfuse-mcp-broker",
           "typryx",
+          "typryx-wardryx-proxy",
           "vouchryx",
           "wardryx"
         ],
@@ -61,6 +62,7 @@
           "verdryx-drift",
           "idryx-detect",
           "mockryx-drill",
+          "chain-verify",
           "trailryx-seal"
         ],
         "routines_by_default": [
@@ -68,6 +70,7 @@
           "qryx-trend",
           "verdryx-drift",
           "idryx-detect",
+          "chain-verify",
           "trailryx-seal"
         ],
         "profiles": [
@@ -102,6 +105,24 @@
         "typed_training_log_is_opt_in": {
           "value": "--typed-training (off by default) sets TYPRYX_TRAINING_DIR=$STACK_UP_HOME/typryx/training, created 0700, beside the ledger at $STACK_UP_HOME/typryx/ledger; needs typryx to run and typryx v0.3.0 or newer",
           "why": "@decided 2026-09-30: a customer can train a model of their own on their own questions and their own human judgements, and typryx supplies the records, so the training log is an opt-in kept off unless asked for. The log holds the question fields a template lets through and never a backend's answer, and the export (typryx export --training) takes its labels from human truths posted to /v1/outcome only, so a hosted provider's answers never become training labels through it. Nothing in this launcher reads or sends the log."
+        },
+        "run_budget_ceiling_is_always_set": {
+          "value": "TOKENFUSE_MAX_RUN_BUDGET_USD on every gateway start, default 5.00, overridden by --run-budget-ceiling <usd>",
+          "why": "@claude 2026-10-04: the default equals tokenfuse's own DEFAULT_RUN_BUDGET, so an ordinary run is unchanged and only a caller-declared larger budget is clamped. The ceiling is tokenfuse v1.5.0's invariant 73 and is off unless set, so a launcher that sets nothing is no more bounded than before. It is not applied to a budget that comes from the Cloud (tokenfuse never clamps those) and not to the MCP broker, which holds no run budget; it is one figure per run, not per agent. A gateway older than v1.5.0 ignores the variable, so the launcher refuses one for a figure the operator asked for and warns for the default. scripts/run-budget-ceiling-is-set.sh holds every start."
+        },
+        "typed_risk_signal_is_opt_in_and_broker_only": {
+          "value": "--typed-risk-signal (off by default) runs `typryx wardryx-proxy` on 127.0.0.1:4330 in front of wardryx and points ONLY the MCP broker's TOKENFUSE_WARDRYX_URL at it",
+          "why": "@decided 2026-10-04 (estate audit, J2): the first typryx consumer is wardryx, and a risk signal may turn a call into a hold and never a deny. This launcher wires it off by default: only with a typed mode that is not off and only when the operator asks, refused at argument parsing otherwise. The LLM gateway keeps talking to wardryx directly, because the model path has no pending tool call to classify and a hosted backend's latency would push decisions past the gateway's own timeout. No hold_if_signal policy is seeded; README.md shows an example.",
+          "note": "@claude 2026-10-04: the broker's policy gate is off unless TOKENFUSE_WARDRYX_MODE and _URL are both set, so the launcher also sets MODE=enforce (the gateway's own mode here), KEY=devkey and a 2000 ms timeout on the broker; the spec named only the URL. The proxy runs with no journal, ledger, key or training log, because each would make it a second writer of a file the typryx service owns (the journal is one hash chain with one writer). Under --typed-mode jev every brokered call's tool name, arguments and target go to TypeSafe AI, one ask per call, which --typed-plan says before anything starts. 'Only the broker can reach it' is as strong as a loopback bind is on one machine: any local process can."
+        },
+        "agent_conform_is_installed_not_started_and_run_by_a_routine": {
+          "value": "agent-conform, built from agent-stack-go's cmd/agent-conform into ~/.taipan/bin like qryx and mockryx, run daily at 06:52 by the chain-verify routine",
+          "why": "@claude 2026-10-04: agent-stack-go v1.1.0's `agent-conform watch-dir` verifies the prev_hash chain of every stream in the events directory and writes one chain_broken (high) event per new break to its own agent-conform.ndjson, which heraldyx reads. stack-up has no scheduler of its own, so the cadence is its routine cadence (daily, 06:xx), not stack-single's 5 minutes or stack-k8s's 15. A break is announced once, so the routine reports a standing break as findings on every later run instead of ok. components.json has no bucket for Go-built installed tools (see CLAUDE.md), so this is a declaration, not a checked list.",
+          "note": "@measured `go build` of heraldyx origin/main (v0.3.0) and agent-stack-go origin/main (v1.1.0) into a scratch directory, then HERALDYX_EVENTS=<scratch bus> HERALDYX_MAIL_FILE=<file> HERALDYX_MIN_SEVERITY=medium heraldyx --from-now=false over a bus where `agent-conform watch-dir` had just written a chain_broken line, 2026-10-04: it mails it (subject '<agent>: chain_broken') with generic wording, 'an event this build does not have a description for, Kind prev_hash_mismatch', naming neither the file nor a tampered stream. @measured `trailryx-node events --file <scratch>/agent-conform.ndjson --trust-domain demo.local` (the trailryx-node in ~/.taipan/bin, built 2026-09-01), 2026-10-04: 1 line refused as unknown_schema, 0 written, so the seal counts it and does not seal it."
+        },
+        "built_from_main_with_minimum_releases": {
+          "value": "no tag pinned; a setting a newer release added is judged at launch by the binary naming it",
+          "why": "@claude 2026-10-04: this launcher builds every plane from source at whatever commit it finds (see distribution), so nothing here is pinned to the 2026-10-04 releases. What it can and does check is that the binary it is about to run reads the setting it is about to hand it: the gateway must name TOKENFUSE_MAX_RUN_BUDGET_USD (tokenfuse v1.5.0) and typryx must name TYPRYX_PROXY_UPSTREAM (v0.4.0, only under --typed-risk-signal). heraldyx v0.3.0 and idryx v1.1.0 refuse a line whose source its file may not carry; scripts/bus-files-match-sources.sh holds every file name this launcher configures."
         }
       }
     }

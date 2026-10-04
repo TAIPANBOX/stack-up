@@ -34,6 +34,11 @@ bash -n up.sh && bash -n down.sh && bash -n routines.sh
 ./scripts/declassify-is-keyed.sh
 ./scripts/revoke-key-not-printed.sh
 ./scripts/typed-mode.sh
+./scripts/run-budget-ceiling-is-set.sh
+./scripts/bus-files-match-sources.sh
+./scripts/chain-verify-routine.sh
+./scripts/manifest-is-true.sh
+./scripts/features-are-bound.sh
 ./scripts/gates-have-teeth.sh   # invariant 6; needs a clean tree
 ```
 
@@ -239,11 +244,12 @@ building here and the thing that most often gets skipped.
     fields a template lets through and never a backend's answer, so a Jev answer
     cannot become a training label through it; the launcher never reads or
     sends the log, and README shows `typryx export --training`.
-    *(gate: `scripts/typed-mode.sh`, 77 checks through `--typed-plan`, plus a
+    *(gate: `scripts/typed-mode.sh`, 123 checks through `--typed-plan` (the last 46 are
+    invariant 13's), plus a
     static check that up.sh never reads the key file, plus the training log's
     directory function and typryx's can-it-log function cut out of `up.sh` and
-    run (0700 fresh and tightened, an old typryx refused); 21 typed cases in
-    `gates-have-teeth.sh`. What it does not cover: typryx actually running in
+    run (0700 fresh and tightened, an old typryx refused); 35 typed cases in
+    `gates-have-teeth.sh` (21 for this invariant, 14 for invariant 13). What it does not cover: typryx actually running in
     each mode, and the key staying out of the running process's arguments and
     log. That half was shown by hand in the pull request that added this
     invariant, not by a script, because it needs a built typryx and a free
@@ -283,6 +289,96 @@ building here and the thing that most often gets skipped.
     line, but the same user can read it (`/proc/<pid>/environ` on Linux, `ps eww`
     on macOS).)*
 
+12. **Every gateway start sets the operator's run-budget ceiling, and the flag
+    refuses what the gateway would refuse.** tokenfuse v1.5.0 (invariant 73) has
+    `TOKENFUSE_MAX_RUN_BUDGET_USD`, a ceiling on the budget one run may be
+    granted when that budget comes from the caller's `x-fuse-budget-usd` header,
+    a policy default or the built-in USD 5, applied on every call so widening an
+    open run reaches the ceiling and no further. It is off unless set, so a
+    launcher that sets nothing is no more bounded than before. `up.sh` sets it
+    on both gateway starts from `RUN_BUDGET_CEILING_USD`, default `5.00`,
+    overridden by `--run-budget-ceiling <usd>`; `--plan` prints the figure.
+    `@claude 2026-10-04`: default 5.00 equals tokenfuse's own DEFAULT_RUN_BUDGET,
+    so an ordinary run is unchanged and only a caller-declared larger budget is
+    clamped. Not on the Cloud budget (tokenfuse does not clamp those) and not on
+    the MCP broker (it holds no run budget). It is one figure per run, not per
+    agent: an agent that opens a new run id gets a new ceiling's worth. A figure
+    the gateway would refuse (zero, a sign, `1e9`, a seventh decimal, past
+    9223372036854.775807; measured against a v1.5.0 gateway 2026-10-04) exits 2
+    at argument parsing, before any build, rather than after it as "gateway did
+    not come up". A gateway that does not name the setting (built before v1.5.0,
+    for example one another tool installed) is refused when the operator asked
+    for a figure and warned about otherwise, judged by the binary naming the
+    setting (`bin_reads_setting`), nothing executed.
+    *(gate: `scripts/run-budget-ceiling-is-set.sh`, 2 starts checked, 22 figures
+    driven through `--plan`, the old-gateway function cut out of `up.sh` and run
+    on three files; 14 cases in `gates-have-teeth.sh`. Not covered: a running
+    gateway clamping a call, which is tokenfuse's own test and needs a built
+    gateway.)*
+
+13. **The typed risk signal is opt-in, says what leaves the machine before
+    anything starts, and reaches only the MCP broker.** `@decided 2026-10-04`
+    (estate audit, J2): the first typryx consumer is wardryx, and a risk signal
+    may turn a call into a hold and never a deny. Here, `--typed-risk-signal`
+    runs `typryx wardryx-proxy` (typryx v0.4.0) on `127.0.0.1:4330` in front of
+    wardryx and points the broker's `TOKENFUSE_WARDRYX_URL`, and only the
+    broker's, at it. Off by default. Refused at argument parsing (exit 2) unless
+    typryx is going to run (`--with-typed`, or `--typed-mode jev` or `own-model`;
+    `off` contradicts it) and wardryx is (not `--only money`); refused at launch
+    when wardryx did not come up, when typryx lacks the proxy, or when the
+    checkout lacks the `action.risk_class` template. The LLM gateway keeps
+    talking to wardryx directly: the model path has no pending call to classify
+    and a hosted backend's latency would push decisions past the gateway's own
+    timeout. No `hold_if_signal` policy is seeded; README.md has an example.
+    `--typed-plan` prints what leaves the machine for the chosen backend: under
+    jev, the tool name, arguments and target of every brokered call go to
+    TypeSafe AI, one ask per call. `@claude 2026-10-04`: the broker's policy gate
+    is off unless `TOKENFUSE_WARDRYX_MODE` and `_URL` are both set, so the
+    launcher also sets MODE=enforce (the gateway's own mode here), KEY and a
+    timeout on the broker; the spec named only the URL. The proxy runs with no
+    journal, no ledger, no keys and no training log: each would make it a second
+    writer of a file the typryx service owns (the journal is one hash chain with
+    one writer, and `agent-conform` now verifies it), and the training log would
+    copy every tool call's arguments. "Only the broker can reach it" is as strong
+    as a loopback bind on one machine: any local process can, and it carries no
+    key because the broker cannot add an `X-Typryx-Key` header.
+    *(gate: `scripts/typed-mode.sh`, section 9 through `--typed-plan` and 7b
+    statically, 46 checks, and 14 cases in `gates-have-teeth.sh`. Not covered: the
+    proxy running in front of a real wardryx behind this broker with a policy that
+    holds; shown by hand in the pull request that added this, not by a script,
+    because it needs built binaries and free ports.)*
+
+14. **Every stream file this launcher configures is one heraldyx and idryx accept
+    as the source it carries.** heraldyx v0.3.0 and idryx v1.1.0 refuse an event
+    whose `source` is not allowed for its file: `<source>.ndjson` carries
+    `<source>`, `tokenfuse-cloud.ndjson` and `tokenfuse-mcp.ndjson` carry
+    `tokenfuse`, anything else is read only for lines claiming its own name. This
+    launcher writes `tokenfuse`, `tokenfuse-mcp`, `wardryx`, `scopyx`, `vouchryx`,
+    `costcrew`, `typryx`, `verdryx` and `agent-conform` under `$EVENTS_DIR`, and
+    passes idryx `--load tokenfuse:tokenfuse.ndjson` in two places; the table is in
+    the pull request that checked it. `@claude 2026-10-04`: the gate's allow table
+    is a copy of the readers' own, and nothing holds the three equal.
+    *(gate: `scripts/bus-files-match-sources.sh`, 9 stream files and 2 `--load`
+    pairs, teeth in `gates-have-teeth.sh`. Not covered: what each producer writes
+    INTO its file; read from each producer's source constant, not measured.)*
+
+15. **The chain-verify routine never calls a standing break ok.**
+    `@claude 2026-10-04`: agent-stack-go v1.1.0's `agent-conform watch-dir`
+    verifies the `prev_hash` chain of every stream in the events directory and
+    appends one `chain_broken` (high) event per NEW break to its own
+    `agent-conform.ndjson`, announcing each break once. `up.sh` installs the
+    binary (built from agent-stack-go's `cmd/agent-conform`, not started) and
+    `routines.sh` runs it daily at 06:52 as `chain-verify`, in the default set,
+    state file under `routines/` and not in the bus. It announces once, so the
+    second run exits 0 on a bus that is still broken: exit 0 with a `FAIL` line in
+    its output is recorded `findings`, never `ok`; exit 1 is `findings`, exit 2 is
+    `error`. heraldyx v0.3.0 mails a `chain_broken` with generic wording (an event
+    this build has no description for, naming neither the file nor a tamper), and
+    the record plane counts it as `unknown_schema` and does not seal it.
+    *(gate: `scripts/chain-verify-routine.sh`, 11 checks against a stand-in
+    verifier, teeth in `gates-have-teeth.sh`. Not covered: the real verifier on a
+    real bus, shown by hand in the pull request that added this.)*
+
 An approved architecture decision is **not finished** until it is two things: a
 numbered invariant in this file, and a gate in a script if it can be checked
 structurally. Until then it is a document, and documents do not stop code.
@@ -291,6 +387,10 @@ structurally. Until then it is a document, and documents do not stop code.
 
 - **No long dashes** anywhere: not in code, docs, commit messages, or PR
   bodies. Use a comma, a colon, parentheses, or a short hyphen.
+- A scenario in `features/` is bound by a `# -> gates-have-teeth.sh "<case>"`
+  line under it, and `scripts/features-are-bound.sh` holds the binding both ways.
+- This launcher pins no tag (it builds from `main`), so a release's new setting is
+  held by checking at launch that the binary names it, never by a version number.
 - Nothing paid or metered gets enabled without telling the user first and
   getting agreement.
 - Do not delete or revoke keys, tokens, or certificates on your own initiative.

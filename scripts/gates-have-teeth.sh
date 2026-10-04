@@ -399,6 +399,207 @@ run_case "typed-mode: a plan creates the training directory" fail \
 	"$(py 'edit("up.sh", "    TYPRYX_ENV+=(\"TYPRYX_TRAINING_DIR=$TYPED_TRAINING_DIR\")", "    TYPRYX_ENV+=(\"TYPRYX_TRAINING_DIR=$TYPED_TRAINING_DIR\")\n    typed_make_training_dir \"$TYPED_TRAINING_DIR\"")')" \
 	"a refusal or a plan created"
 
+# invariant 12: every gateway start sets the operator's run-budget ceiling.
+# tokenfuse v1.5.0 applies none unless the variable is set, so a start that
+# forgets it still comes up and serves traffic with a caller-chosen per-run
+# budget. edit() replaces only the first occurrence, so the other start keeps it.
+run_case "run-budget-ceiling-is-set: one gateway start drops the ceiling" fail \
+	'./scripts/run-budget-ceiling-is-set.sh' \
+	"$(py 'edit("up.sh", "  TOKENFUSE_MAX_RUN_BUDGET_USD=\"$RUN_BUDGET_CEILING_USD\" \\\n", "")')" \
+	"does not set TOKENFUSE_MAX_RUN_BUDGET_USD"
+
+run_case "run-budget-ceiling-is-set: the ceiling becomes a literal" fail \
+	'./scripts/run-budget-ceiling-is-set.sh' \
+	"$(py 'edit("up.sh", "TOKENFUSE_MAX_RUN_BUDGET_USD=\"$RUN_BUDGET_CEILING_USD\"", "TOKENFUSE_MAX_RUN_BUDGET_USD=\"5.00\"")')" \
+	"is not set from"
+
+run_case "run-budget-ceiling-is-set: the default changes from 5.00" fail \
+	'./scripts/run-budget-ceiling-is-set.sh' \
+	"$(py 'edit("up.sh", "RUN_BUDGET_CEILING_USD=\"5.00\"\nRUN_BUDGET_CEILING_ASKED=0", "RUN_BUDGET_CEILING_USD=\"50.00\"\nRUN_BUDGET_CEILING_ASKED=0")')" \
+	"the ceiling default is not 5.00"
+
+run_case "run-budget-ceiling-is-set: the flag takes a zero" fail \
+	'./scripts/run-budget-ceiling-is-set.sh' \
+	"$(py 'edit("up.sh", " && [[ \"$RUN_BUDGET_CEILING_USD\" =~ [1-9] ]]", "")')" \
+	"exit 0, wanted 2 naming the flag"
+
+run_case "run-budget-ceiling-is-set: the flag takes a figure past the gateway's range" fail \
+	'./scripts/run-budget-ceiling-is-set.sh' \
+	"$(py 'edit("up.sh", "\u007b1,12\u007d", "\u007b1,20\u007d")')" \
+	"exit 0, wanted 2 naming the flag"
+
+run_case "run-budget-ceiling-is-set: the flag takes a seventh decimal" fail \
+	'./scripts/run-budget-ceiling-is-set.sh' \
+	"$(py 'edit("up.sh", "\u007b1,6\u007d", "\u007b1,9\u007d")')" \
+	"exit 0, wanted 2 naming the flag"
+
+run_case "run-budget-ceiling-is-set: the validation is gone" fail \
+	'./scripts/run-budget-ceiling-is-set.sh' \
+	"$(py 'edit("up.sh", "resolve_run_budget_ceiling\nresolve_typed_mode\n", "resolve_typed_mode\n")')" \
+	"exit 0, wanted 2 naming the flag"
+
+run_case "run-budget-ceiling-is-set: an old gateway is judged to read the setting" fail \
+	'./scripts/run-budget-ceiling-is-set.sh' \
+	"$(py 'edit("up.sh", "[ -f \"$1\" ] && grep -qa -- \"$2\" \"$1\" 2>/dev/null", "[ -f \"$1\" ]")')" \
+	"an old gateway would pass"
+
+run_case "run-budget-ceiling-is-set: the refusal of an old gateway the operator asked for is removed" fail \
+	'./scripts/run-budget-ceiling-is-set.sh' \
+	"$(py 'edit("up.sh", "die \"--run-budget-ceiling needs a gateway built from tokenfuse v1.5.0", "warn \"--run-budget-ceiling needs a gateway built from tokenfuse v1.5.0")')" \
+	"does not refuse a gateway that ignores a ceiling the operator asked for"
+
+# invariant 13: the typed risk signal is opt-in. Every one of these is an edit
+# somebody makes with a reason: make it the default because the signal is useful,
+# accept it with typed mode off or without a wardryx, stop saying what leaves the
+# machine, point the gateway at the proxy, or let the proxy write the service's
+# files.
+run_case "typed-mode: the risk signal is on by default" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "TYPED_RISK_SIGNAL=0\n", "TYPED_RISK_SIGNAL=1\n")')" \
+	"exit 2, wanted 0"
+
+run_case "typed-mode: the risk signal is accepted with typed mode off" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "    [ \"$TYPED_MODE\" != off ] || typed_refuse \"--typed-risk-signal and --typed-mode off contradict each other: off starts no typryx, so there is nothing to give wardryx a signal\"\n", "")')" \
+	"output does not say: contradict"
+
+run_case "typed-mode: the risk signal is accepted without wardryx" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "    [ \"$ONLY_MONEY\" -eq 0 ] || typed_refuse \"--typed-risk-signal needs wardryx, and --only money does not start it\"\n", "")')" \
+	"exit 0, wanted 2"
+
+run_case "typed-mode: the risk signal plan stops naming the hosted API" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "hosted Jev API, one ask per call", "a provider, one ask per call")')" \
+	"last plan does not contain: risk signal leaves this machine: the tool name"
+
+run_case "typed-mode: the gateway is pointed at the proxy" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "  TOKENFUSE_WARDRYX_URL=\"$WARDRYX_URL\" \\\n", "  TOKENFUSE_WARDRYX_URL=\"http://127.0.0.1:$TYPRYX_PROXY_PORT\" \\\n")')" \
+	"a gateway start names the proxy"
+
+run_case "typed-mode: the broker is not pointed at the proxy" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "\"TOKENFUSE_WARDRYX_URL=http://127.0.0.1:$TYPRYX_PROXY_PORT\"", "\"TOKENFUSE_WARDRYX_URL=http://127.0.0.1:$WARDRYX_PORT\"")')" \
+	"not the proxy's loopback address"
+
+run_case "typed-mode: the broker's policy gate is left off" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "    \"TOKENFUSE_WARDRYX_MODE=enforce\"\n", "")')" \
+	"policy gate is off without TOKENFUSE_WARDRYX_MODE"
+
+run_case "typed-mode: the proxy keeps the service's journal" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "TYPRYX_PROXY_ENV=(-u TYPRYX_EVENTS -u TYPRYX_LEDGER_DIR", "TYPRYX_PROXY_ENV=(-u TYPRYX_LEDGER_DIR")')" \
+	"last plan does not contain: proxy env: -u TYPRYX_EVENTS"
+
+run_case "typed-mode: the proxy inherits the training log" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "      case \"$e\" in TYPRYX_TRAINING_DIR=*) continue ;; esac\n", "")')" \
+	"last plan contains: proxy env: TYPRYX_TRAINING_DIR="
+
+run_case "typed-mode: the proxy binds beyond loopback" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "TYPRYX_PROXY_ADDR=\"127.0.0.1:$TYPRYX_PROXY_PORT\"", "TYPRYX_PROXY_ADDR=\"0.0.0.0:$TYPRYX_PROXY_PORT\"")')" \
+	"not bound to loopback on TYPRYX_PROXY_PORT"
+
+run_case "typed-mode: the proxy is never registered" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "  register typryx-wardryx-proxy \"$!\" TERM\n", "  :\n")')" \
+	"never registered"
+
+# invariant 14: every stream file this launcher configures is one heraldyx v0.3.0
+# and idryx v1.1.0 accept as the source it carries. A file named for something
+# else is read only for lines claiming its own name and refused otherwise, and
+# nothing about the run says so.
+run_case "bus-files-match-sources: the typryx journal is renamed" fail \
+	'./scripts/bus-files-match-sources.sh' \
+	"$(py 'edit("up.sh", "TYPRYX_EVENTS=\"$EVENTS_DIR/typryx.ndjson\"", "TYPRYX_EVENTS=\"$EVENTS_DIR/typryx-journal.ndjson\"")')" \
+	"is not a stream heraldyx"
+
+run_case "bus-files-match-sources: the broker's events get a generic name" fail \
+	'./scripts/bus-files-match-sources.sh' \
+	"$(py 'edit("up.sh", "TOKENFUSE_EVENTS_PATH=\"$EVENTS_DIR/tokenfuse-mcp.ndjson\"", "TOKENFUSE_EVENTS_PATH=\"$EVENTS_DIR/events.ndjson\"")')" \
+	"is not a stream heraldyx"
+
+run_case "bus-files-match-sources: the verifier's own stream is renamed" fail \
+	'./scripts/bus-files-match-sources.sh' \
+	"$(py 'edit("routines.sh", "-out \"$EVENTS_DIR/agent-conform.ndjson\"", "-out \"$EVENTS_DIR/chain-verify.ndjson\"")')" \
+	"is not a stream heraldyx"
+
+run_case "bus-files-match-sources: idryx is loaded with the wrong source" fail \
+	'./scripts/bus-files-match-sources.sh' \
+	"$(py 'edit("routines.sh", "--load \"tokenfuse:$EVENTS_FILE\"", "--load \"wardryx:$EVENTS_FILE\"")')" \
+	"may only carry"
+
+run_case "bus-files-match-sources: idryx is pointed at another plane's file" fail \
+	'./scripts/bus-files-match-sources.sh' \
+	"$(py 'edit("up.sh", "--load \"tokenfuse:$EVENTS_FILE\"", "--load \"tokenfuse:$EVENTS_DIR/wardryx.ndjson\"")')" \
+	"may only carry wardryx"
+
+# invariant 15: the verifier announces a break once and exits 0 on every run after
+# the first, so exit 0 with a FAIL line still in its output is findings. Mapped to
+# ok, a cut chain reads green from the second night on.
+run_case "chain-verify-routine: a standing break is reported ok" fail \
+	'./scripts/chain-verify-routine.sh' \
+	"$(py 'edit("routines.sh", "      if [ -n \"$first\" ]; then\n        known=", "      if false; then\n        known=")')" \
+	"recorded status 'ok', wanted 'findings'"
+
+run_case "chain-verify-routine: a new break is reported ok" fail \
+	'./scripts/chain-verify-routine.sh' \
+	"$(py 'edit("routines.sh", "    1)\n      RESULT_STATUS=findings\n      RESULT_REASON=\"$first\"", "    1)\n      RESULT_STATUS=ok\n      RESULT_REASON=\"$first\"")')" \
+	"recorded status 'ok', wanted 'findings'"
+
+run_case "chain-verify-routine: a failed run is reported ok" fail \
+	'./scripts/chain-verify-routine.sh' \
+	"$(py 'edit("routines.sh", "    *)\n      RESULT_STATUS=error\n      RESULT_REASON=\"$(tail -n1 \"$log\" 2>/dev/null)\"\n      RESULT_SUMMARY=\"agent-conform watch-dir exited $rc\" ;;", "    *)\n      RESULT_STATUS=ok\n      RESULT_REASON=\"$(tail -n1 \"$log\" 2>/dev/null)\"\n      RESULT_SUMMARY=\"agent-conform watch-dir exited $rc\" ;;")')" \
+	"routine exit 0, wanted 1"
+
+run_case "chain-verify-routine: an empty bus is run anyway" fail \
+	'./scripts/chain-verify-routine.sh' \
+	"$(py 'edit("routines.sh", "  if [ \"$\u007b#files[@]\u007d\" -eq 0 ]; then\n    RESULT_STATUS=skipped; RESULT_EXIT_CODE=0\n    RESULT_REASON=\"no event files in $EVENTS_DIR yet\"\n    return\n  fi\n\n  local log=\"$LOGS_DIR/chain-verify.log\"", "  local log=\"$LOGS_DIR/chain-verify.log\"")')" \
+	"recorded status 'ok', wanted 'skipped'"
+
+run_case "chain-verify-routine: it is dropped from the default timers" fail \
+	'./scripts/chain-verify-routine.sh' \
+	"$(py 'edit("routines.sh", "DEFAULT_ROUTINES=(focus-export qryx-trend verdryx-drift idryx-detect chain-verify trailryx-seal)", "DEFAULT_ROUTINES=(focus-export qryx-trend verdryx-drift idryx-detect trailryx-seal)")')" \
+	"install wrote no chain-verify unit"
+
+run_case "chain-verify-routine: it moves to 06:57 with the seal" fail \
+	'./scripts/chain-verify-routine.sh' \
+	"$(py 'edit("routines.sh", "    chain-verify)  echo 52 ;;", "    chain-verify)  echo 57 ;;")')" \
+	"not at 06:52"
+
+run_case "chain-verify-routine: the state file is written into the bus" fail \
+	'./scripts/chain-verify-routine.sh' \
+	"$(py 'edit("routines.sh", "-state \"$ROUTINES_DIR/agent-conform.state.json\"", "-state \"$EVENTS_DIR/agent-conform.state.json\"")')" \
+	"is not given the bus"
+
+run_case "manifest-is-true: a routine is scheduled and not declared" fail \
+	'./scripts/manifest-is-true.sh' \
+	"$(py 'import json
+p = "components.json"
+d = json.load(open(p))
+c = d["components"][0]["checked"]
+before = len(c["schedules_routines"])
+c["schedules_routines"] = [r for r in c["schedules_routines"] if r != "chain-verify"]
+assert len(c["schedules_routines"]) == before - 1, "chain-verify was not declared"
+json.dump(d, open(p, "w"), indent=2)')" \
+	"components.json does not say so"
+
+# The binding gate: a scenario names the case that holds it, and the pointer breaks
+# by itself when a case is renamed. Both directions, and a gate with nothing to
+# read says so.
+run_case "features-are-bound: a binding names a case that does not exist" fail \
+	'./scripts/features-are-bound.sh' \
+	"$(py 'edit("features/the-declassify-key-is-minted.feature", "gates-have-teeth.sh \"declassify-is-keyed: the key becomes a literal\"", "gates-have-teeth.sh \"declassify-is-keyed: no such case\"")')" \
+	"no such run_case exists"
+
+run_case "features-are-bound: a scenario with no binding" fail \
+	'./scripts/features-are-bound.sh' \
+	"$(py 'edit("features/the-declassify-key-is-minted.feature", "    # -> gates-have-teeth.sh \"declassify-is-keyed: the key becomes a literal\"\n", "")')" \
+	"is bound to no case"
+
 echo
 echo "=== and what they must NOT catch ==="
 
@@ -478,6 +679,36 @@ run_case "typed-mode: a log line names the key file's path, not its content" pas
 run_case "typed-mode: the training log's launch line is reworded" pass \
 	'./scripts/typed-mode.sh' \
 	"$(py 'edit("up.sh", "(0700, this machine only; no backend answers in it)", "(private, local)")')"
+
+run_case "run-budget-ceiling-is-set: an unrelated var added to the block" pass \
+	'./scripts/run-budget-ceiling-is-set.sh' \
+	"$(py 'edit("up.sh", "TOKENFUSE_CLOUD_KEY=\"devkey\" \\\n", "TOKENFUSE_CLOUD_KEY=\"devkey\" \\\nTOKENFUSE_SPARE=\"1\" \\\n")')"
+
+# The broker is the same binary on a subcommand and holds no run budget, so a
+# second such start, with a variable of its own, must not be judged a gateway.
+run_case "run-budget-ceiling-is-set: a second mcp-broker start is not mistaken for a gateway start" pass \
+	'./scripts/run-budget-ceiling-is-set.sh' \
+	"$(py 'edit("up.sh", "\n  register tokenfuse-mcp-broker \"$!\" TERM\n", "\n  register tokenfuse-mcp-broker \"$!\" TERM\n  TOKENFUSE_MCP_ADDR=\"127.0.0.1:9999\" \\\n    \"$GATEWAY_BIN\" mcp-broker > /dev/null 2>&1 &\n")')"
+
+run_case "typed-mode: the risk signal's launch line is reworded" pass \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "starting typryx wardryx-proxy on", "starting the typryx proxy on")')"
+
+run_case "typed-mode: an unrelated variable is added to the proxy's launch" pass \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "  TYPRYX_PROXY_UPSTREAM=\"http://127.0.0.1:$WARDRYX_PORT\" \\\n", "  TYPRYX_PROXY_UPSTREAM=\"http://127.0.0.1:$WARDRYX_PORT\" \\\n  TYPRYX_SPARE=\"1\" \\\n")')"
+
+run_case "bus-files-match-sources: a stream the readers know is added" pass \
+	'./scripts/bus-files-match-sources.sh' \
+	"$(py 'edit("up.sh", "GATEWAY_PORT=4100\n", "GATEWAY_PORT=4100\nSPARE_STREAM=\"$EVENTS_DIR/idryx.ndjson\"\n")')"
+
+run_case "bus-files-match-sources: the cloud's and broker's files carry tokenfuse" pass \
+	'./scripts/bus-files-match-sources.sh' \
+	"$(py 'edit("up.sh", "GATEWAY_PORT=4100\n", "GATEWAY_PORT=4100\nSPARE_CLOUD=\"$EVENTS_DIR/tokenfuse-cloud.ndjson\"\nSPARE_MCP=\"$EVENTS_DIR/tokenfuse-mcp.ndjson\"\n")')"
+
+run_case "chain-verify-routine: the routine's comments are reworded" pass \
+	'./scripts/chain-verify-routine.sh' \
+	"$(py 'edit("routines.sh", "THE TRAP THIS ROUTINE CLOSES ITSELF", "THE TRAP THIS ROUTINE CLOSES FOR ITSELF")')"
 
 echo
 echo "=== and the one this estate learned the hard way ==="
@@ -584,6 +815,76 @@ run_case "typed-mode: the typryx can-it-log function is renamed away" fail \
 assert "typed_bin_has_training" in s, "function not present"
 open("up.sh", "w").write(s.replace("typed_bin_has_training", "typed_bin_can_log"))')" \
 	"measured nothing"
+
+run_case "run-budget-ceiling-is-set: no up.sh left to read" fail \
+	'./scripts/run-budget-ceiling-is-set.sh' \
+	"$(py 'import subprocess, os
+assert os.path.exists("up.sh"), "expected up.sh"
+subprocess.run(["git", "mv", "up.sh", "up.bash"], check=True)')" \
+	"measured nothing"
+
+run_case "run-budget-ceiling-is-set: no gateway start left to judge" fail \
+	'./scripts/run-budget-ceiling-is-set.sh' \
+	"$(py 's = open("up.sh").read()
+t = s.replace("\"$GATEWAY_BIN\" > \"$LOGS_DIR/gateway.log\" 2>&1 &", "gateway_launcher > \"$LOGS_DIR/gateway.log\" 2>&1 &")
+assert t != s
+open("up.sh", "w").write(t)')" \
+	"nowhere, so this measured nothing"
+
+# The ceiling is judged through the plan flag. Rename it and every refusal would be
+# an "unknown option" message, so this must say it measured nothing.
+run_case "run-budget-ceiling-is-set: up.sh has no --plan" fail \
+	'./scripts/run-budget-ceiling-is-set.sh' \
+	"$(py 'edit("up.sh", "--typed-plan|--plan) TYPED_PLAN=1 ;;", "--typed-plan) TYPED_PLAN=1 ;;")')" \
+	"has no --plan"
+
+# The static half finds the broker by its launch line. Rename the launch and it
+# must say it found none, not pass for having nothing to judge.
+run_case "typed-mode: no broker start left to judge" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "\"$GATEWAY_BIN\" mcp-broker > \"$LOGS_DIR/tokenfuse-mcp-broker.log\"", "broker_launcher > \"$LOGS_DIR/tokenfuse-mcp-broker.log\"")')" \
+	"measured nothing"
+
+run_case "bus-files-match-sources: no up.sh left to read" fail \
+	'./scripts/bus-files-match-sources.sh' \
+	"$(py 'import subprocess, os
+assert os.path.exists("up.sh"), "expected up.sh"
+subprocess.run(["git", "mv", "up.sh", "up.bash"], check=True)')" \
+	"measured nothing"
+
+run_case "bus-files-match-sources: no stream left to judge" fail \
+	'./scripts/bus-files-match-sources.sh' \
+	"$(py 'for f in ("up.sh", "routines.sh"):
+    s = open(f).read()
+    t = s.replace("$EVENTS_DIR/", "$EVDIR/")
+    assert t != s, f
+    open(f, "w").write(t)')" \
+	"measured NOTHING"
+
+run_case "chain-verify-routine: no routine left to judge" fail \
+	'./scripts/chain-verify-routine.sh' \
+	"$(py 'edit("routines.sh", "routine_chain_verify() \u007b", "routine_chain_check() \u007b")')" \
+	"measured nothing"
+
+run_case "features-are-bound: no features left to read" fail \
+	'./scripts/features-are-bound.sh' \
+	"$(py 'import subprocess, os
+assert os.path.isdir("features"), "expected features/"
+subprocess.run(["git", "mv", "features", "features.old"], check=True)')" \
+	"measured nothing"
+
+run_case "features-are-bound: no scenario left to bind" fail \
+	'./scripts/features-are-bound.sh' \
+	"$(py 'import glob
+n = 0
+for f in glob.glob("features/*.feature"):
+    s = open(f).read()
+    t = s.replace("  Scenario:", "  Example:")
+    if t != s:
+        n += 1
+        open(f, "w").write(t)
+assert n, "no feature file had a scenario"')" \
+	"measured NOTHING"
 
 echo
 if [ -n "$(git status --porcelain)" ]; then

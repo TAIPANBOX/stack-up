@@ -246,6 +246,21 @@ BROKER_PORT=4200
 # reused rather than picked here. The proxy only ever starts under
 # --typed-risk-signal, between the MCP broker and wardryx.
 TYPRYX_PROXY_PORT=4330
+# The two deadlines of the typed risk signal, aligned with stack-single#88.
+# The proxy asks its typed backend BEFORE it forwards the decision to wardryx,
+# so the ask deadline is spent first and the broker's decide deadline has to
+# outlast it. typryx's own default for the ask is 150 ms (typryx v0.4.0 release
+# notes), which drops almost every real answer: measured 2026-09-30 on a frozen
+# 434-question test, Jev's median is 229 ms and a qwen2.5:7b own-model's 2130 ms
+# on 8 vCPU. A late answer is dropped, the call is forwarded with no signal, and
+# a hold_if_signal rule then never fires without anything saying so. 3000 clears
+# both medians and is inside typryx's accepted range (1 to 5000). The broker's
+# decide deadline is TOKENFUSE_MCP_WARDRYX_TIMEOUT_MS, the one tokenfuse reads
+# for a decide that carries a tool_call (invariant 74; wardryx.rs); 7000 is the
+# ask plus wardryx's own time with room. The LLM gateway's own wardryx timeout
+# is not touched: its decisions never go through the proxy.
+RISK_ASK_TIMEOUT_MS=3000
+RISK_DECIDE_TIMEOUT_MS=7000
 
 # --------------------------------------------------------------------------
 # Options
@@ -513,13 +528,13 @@ resolve_typed_mode() {
     # loopback bind needs none (typryx refuses a wide bind without them).
     # Every `-u` first, then the assignments, the same ordering rule as above.
     TYPRYX_PROXY_ENV=(-u TYPRYX_EVENTS -u TYPRYX_LEDGER_DIR -u TYPRYX_KEYS -u TYPRYX_TRAINING_DIR
-      -u TYPRYX_ALLOW_OPEN_BIND -u TYPRYX_PROXY_ASK_TIMEOUT_MS)
+      -u TYPRYX_ALLOW_OPEN_BIND)
     local e
     for e in ${TYPRYX_ENV[@]+"${TYPRYX_ENV[@]}"}; do
       case "$e" in TYPRYX_TRAINING_DIR=*) continue ;; esac
       TYPRYX_PROXY_ENV+=("$e")
     done
-    TYPRYX_PROXY_ENV+=("TYPRYX_PROXY_TEMPLATE=action.risk_class")
+    TYPRYX_PROXY_ENV+=("TYPRYX_PROXY_TEMPLATE=action.risk_class" "TYPRYX_PROXY_ASK_TIMEOUT_MS=$RISK_ASK_TIMEOUT_MS")
   fi
 }
 
@@ -555,6 +570,7 @@ print_typed_plan() {
     printf 'typed: risk signal leaves this machine: %s\n' "$TYPED_RISK_LEAVES"
     printf 'typed: risk signal cost: one ask of that backend per eligible brokered call, capped by the proxy'"'"'s own TYPRYX_MAX_CALLS_PER_HOUR (typryx default 1000, separate from the service'"'"'s)\n'
     printf 'typed: risk signal policy: none is seeded; a hold_if_signal rule is yours to write (README.md has an example)\n'
+    printf 'typed: risk signal deadlines: the proxy waits %s ms for the backend'"'"'s answer (typryx'"'"'s own default, 150 ms, would drop a hosted or local-model answer), the broker waits %s ms for the decision\n' "$RISK_ASK_TIMEOUT_MS" "$RISK_DECIDE_TIMEOUT_MS"
     unset_next=0
     for e in "${TYPRYX_PROXY_ENV[@]}"; do
       if [ "$unset_next" -eq 1 ]; then
@@ -2162,6 +2178,7 @@ if [ "$TYPED_RISK_SIGNAL" -eq 1 ]; then
     "TOKENFUSE_WARDRYX_URL=http://127.0.0.1:$TYPRYX_PROXY_PORT"
     "TOKENFUSE_WARDRYX_KEY=devkey"
     "TOKENFUSE_WARDRYX_TIMEOUT_MS=2000"
+    "TOKENFUSE_MCP_WARDRYX_TIMEOUT_MS=$RISK_DECIDE_TIMEOUT_MS"
   )
 fi
 

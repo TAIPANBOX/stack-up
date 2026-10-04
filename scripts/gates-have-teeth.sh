@@ -600,6 +600,40 @@ run_case "features-are-bound: a scenario with no binding" fail \
 	"$(py 'edit("features/the-declassify-key-is-minted.feature", "    # -> gates-have-teeth.sh \"declassify-is-keyed: the key becomes a literal\"\n", "")')" \
 	"is bound to no case"
 
+# invariant 13, deadlines (stack-single#88): the proxy asks its backend before the
+# decision is forwarded, so typryx default ask deadline of 150 ms drops a hosted
+# (229 ms median) or local-model (2130 ms) answer and a hold_if_signal rule then
+# never fires, silently. Each edit below is one way to land back there.
+run_case "typed-mode: the proxy ask deadline is left unset" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", " \"TYPRYX_PROXY_ASK_TIMEOUT_MS=$RISK_ASK_TIMEOUT_MS\")", ")")')" \
+	"last plan does not contain: proxy env: TYPRYX_PROXY_ASK_TIMEOUT_MS=3000"
+
+run_case "typed-mode: the proxy ask deadline is shorter than the longest answer" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "RISK_ASK_TIMEOUT_MS=3000\n", "RISK_ASK_TIMEOUT_MS=150\n")')" \
+	"not longer than the longest measured answer"
+
+run_case "typed-mode: the proxy ask deadline is past what typryx accepts" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "RISK_ASK_TIMEOUT_MS=3000\n", "RISK_ASK_TIMEOUT_MS=6000\n")')" \
+	"past the 5000 ms typryx accepts"
+
+run_case "typed-mode: the broker decide deadline is shorter than the ask" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "RISK_DECIDE_TIMEOUT_MS=7000\n", "RISK_DECIDE_TIMEOUT_MS=2000\n")')" \
+	"not longer than the proxy ask deadline"
+
+run_case "typed-mode: the broker is not given the tool-call decide deadline" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "    \"TOKENFUSE_MCP_WARDRYX_TIMEOUT_MS=$RISK_DECIDE_TIMEOUT_MS\"\n", "")')" \
+	"is not given TOKENFUSE_MCP_WARDRYX_TIMEOUT_MS"
+
+run_case "typed-mode: the gateway's own wardryx timeout is changed with the risk signal" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "TOKENFUSE_WARDRYX_TIMEOUT_MS=\"2000\"", "TOKENFUSE_WARDRYX_TIMEOUT_MS=\"7000\"")')" \
+	"no longer 2000"
+
 echo
 echo "=== and what they must NOT catch ==="
 
@@ -709,6 +743,10 @@ run_case "bus-files-match-sources: the cloud's and broker's files carry tokenfus
 run_case "chain-verify-routine: the routine's comments are reworded" pass \
 	'./scripts/chain-verify-routine.sh' \
 	"$(py 'edit("routines.sh", "THE TRAP THIS ROUTINE CLOSES ITSELF", "THE TRAP THIS ROUTINE CLOSES FOR ITSELF")')"
+
+run_case "typed-mode: the deadline comment is reworded" pass \
+	'./scripts/typed-mode.sh' \
+	"$(py 'edit("up.sh", "which drops almost every real answer", "which drops most real answers")')"
 
 echo
 echo "=== and the one this estate learned the hard way ==="
@@ -885,6 +923,14 @@ for f in glob.glob("features/*.feature"):
         open(f, "w").write(t)
 assert n, "no feature file had a scenario"')" \
 	"measured NOTHING"
+
+run_case "typed-mode: the deadline constants are renamed away" fail \
+	'./scripts/typed-mode.sh' \
+	"$(py 's = open("up.sh").read()
+t = s.replace("RISK_ASK_TIMEOUT_MS", "RISK_ASKMS")
+assert t != s
+open("up.sh", "w").write(t)')" \
+	"deadlines are unset"
 
 echo
 if [ -n "$(git status --porcelain)" ]; then

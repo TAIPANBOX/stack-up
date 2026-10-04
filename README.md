@@ -472,6 +472,17 @@ above, not the example above, because the stub's answers mean nothing) the same 
 was refused with "requires approval" and a wardryx approval id, and a call through
 the gateway still answered 200.
 
+Two deadlines matter. The proxy asks typryx's backend before it forwards the decision,
+and typryx's own default of 150 ms for that ask drops almost every real answer (a
+hosted Jev answer takes about 229 ms at the median, a qwen2.5:7b own-model about 2130
+ms on 8 vCPU), after which the call goes to wardryx with no signal and a
+`hold_if_signal` rule never fires, silently. So `up.sh` gives the proxy
+`TYPRYX_PROXY_ASK_TIMEOUT_MS=3000` and the broker `TOKENFUSE_MCP_WARDRYX_TIMEOUT_MS=7000`
+(the variable tokenfuse reads for a decision that carries a tool call), the same
+figures stack-single uses. The LLM gateway's own wardryx timeout is unchanged. A local
+model slower than typryx's own 2-second backend deadline still needs
+`TYPRYX_TIMEOUT_MS` exported before `./up.sh`.
+
 The proxy runs with no journal, no ledger, no keys and no training log, deliberately.
 The typryx service's journal is one hash chain with one writer, and a second process
 appending to it would break the chain the on-box verifier checks; the training log

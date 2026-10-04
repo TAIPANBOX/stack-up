@@ -224,6 +224,9 @@ has "proxy env: -u TYPRYX_KEYS"
 has "proxy env: -u TYPRYX_TRAINING_DIR"
 has "proxy env: TYPRYX_BACKEND=stub"
 has "proxy env: TYPRYX_PROXY_TEMPLATE=action.risk_class"
+has "proxy env: TYPRYX_PROXY_ASK_TIMEOUT_MS=3000"
+has "the proxy waits 3000 ms for the backend"
+has "the broker waits 7000 ms for the decision"
 lacks "proxy env: TYPRYX_EVENTS="
 lacks "proxy env: TYPRYX_LEDGER_DIR="
 lacks "proxy env: TYPRYX_KEYS="
@@ -234,6 +237,7 @@ expect "risk, jev: says the calls go to the hosted API" 0 "risk signal: on" -- -
 has "risk signal leaves this machine: the tool name, the arguments and the target of EVERY brokered tool call go to TypeSafe AI's hosted Jev API"
 has "proxy env: TYPRYX_BACKEND=jev"
 has "proxy env: TYPRYX_JEV_KEY_FILE=$work/key"
+has "proxy env: TYPRYX_PROXY_ASK_TIMEOUT_MS=3000"
 has "proxy env: -u TYPRYX_OPENAI_URL"
 env_ordered
 proxy_env_ordered
@@ -241,6 +245,7 @@ expect "risk, own-model: names the server it goes to" 0 "risk signal: on" -- --t
 has "go to the model server you named, http://127.0.0.1:11434/v1"
 lacks "TypeSafe AI's hosted"
 has "proxy env: TYPRYX_OPENAI_URL=http://127.0.0.1:11434/v1"
+has "proxy env: TYPRYX_PROXY_ASK_TIMEOUT_MS=3000"
 env_ordered
 proxy_env_ordered
 # The training log belongs to the service. The proxy would copy every tool
@@ -327,6 +332,33 @@ else:
         problems.append("up.sh: the broker's TOKENFUSE_WARDRYX_URL is not the proxy's loopback address")
     if 'TOKENFUSE_WARDRYX_MODE=enforce' not in env:
         problems.append("up.sh: the broker's policy gate is off without TOKENFUSE_WARDRYX_MODE (it needs MODE and URL both)")
+# The deadlines. The proxy asks its backend first, so its ask deadline is spent
+# before the broker's decide deadline starts mattering to the answer: typryx's
+# own default (150 ms) drops a hosted (Jev p50 229 ms) or local-model (qwen2.5:7b
+# p50 2130 ms on 8 vCPU) answer, and the broker must wait longer than the ask.
+LONGEST_ASK_MS = 2130   # measured 2026-09-30, README "What the two real modes measured"
+MAX_ASK_MS = 5000       # typryx rejects a larger TYPRYX_PROXY_ASK_TIMEOUT_MS
+def const(name):
+    m = re.search(r"^" + name + r"=(\d+)\s*$", text, re.M)
+    return int(m.group(1)) if m else None
+ask, decide = const("RISK_ASK_TIMEOUT_MS"), const("RISK_DECIDE_TIMEOUT_MS")
+if ask is None or decide is None:
+    problems.append("up.sh: RISK_ASK_TIMEOUT_MS or RISK_DECIDE_TIMEOUT_MS is not assigned a whole number, so the deadlines are unset")
+else:
+    if ask <= LONGEST_ASK_MS:
+        problems.append("up.sh: the proxy ask deadline (%d ms) is not longer than the longest measured answer (%d ms), so it drops the answers of that backend" % (ask, LONGEST_ASK_MS))
+    if ask > MAX_ASK_MS:
+        problems.append("up.sh: the proxy ask deadline (%d ms) is past the %d ms typryx accepts, so the proxy would refuse to start" % (ask, MAX_ASK_MS))
+    if decide <= ask:
+        problems.append("up.sh: the broker decide deadline (%d ms) is not longer than the proxy ask deadline (%d ms), so the broker gives up before the signal can arrive" % (decide, ask))
+if not any("TYPRYX_PROXY_ASK_TIMEOUT_MS=$RISK_ASK_TIMEOUT_MS" in a for a in re.findall(r"TYPRYX_PROXY_ENV\+=\(([^)]*)\)", text)):
+    problems.append("up.sh: the proxy is never given TYPRYX_PROXY_ASK_TIMEOUT_MS from RISK_ASK_TIMEOUT_MS, so it runs on typryx's 150 ms default")
+if assigns and "TOKENFUSE_MCP_WARDRYX_TIMEOUT_MS=$RISK_DECIDE_TIMEOUT_MS" not in " ".join(assigns):
+    problems.append("up.sh: the broker is not given TOKENFUSE_MCP_WARDRYX_TIMEOUT_MS from RISK_DECIDE_TIMEOUT_MS, the variable tokenfuse reads for a decide that carries a tool call")
+# The LLM gateway own wardryx timeout is not part of this.
+gw_blocks = ["\n".join(block_ending_at(i)) for i in gateway_starts]
+if not any('TOKENFUSE_WARDRYX_TIMEOUT_MS="2000"' in b for b in gw_blocks):
+    problems.append("up.sh: the gateway own TOKENFUSE_WARDRYX_TIMEOUT_MS is no longer 2000; the gateway never goes through the proxy and its timeout is not part of the risk signal")
 proxy = [i for i, l in live if re.search(r'wardryx-proxy\s*>', l)]
 if not proxy:
     problems.append("up.sh: no `typryx wardryx-proxy` launch found")

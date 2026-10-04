@@ -39,6 +39,7 @@ bash -n up.sh && bash -n down.sh && bash -n routines.sh
 ./scripts/chain-verify-routine.sh
 ./scripts/manifest-is-true.sh
 ./scripts/features-are-bound.sh
+./scripts/die-keeps-its-exit-status.sh
 ./scripts/gates-have-teeth.sh   # invariant 6; needs a clean tree
 ```
 
@@ -244,12 +245,12 @@ building here and the thing that most often gets skipped.
     fields a template lets through and never a backend's answer, so a Jev answer
     cannot become a training label through it; the launcher never reads or
     sends the log, and README shows `typryx export --training`.
-    *(gate: `scripts/typed-mode.sh`, 123 checks through `--typed-plan` (the last 46 are
+    *(gate: `scripts/typed-mode.sh`, 128 checks through `--typed-plan` (the last 51 are
     invariant 13's), plus a
     static check that up.sh never reads the key file, plus the training log's
     directory function and typryx's can-it-log function cut out of `up.sh` and
-    run (0700 fresh and tightened, an old typryx refused); 35 typed cases in
-    `gates-have-teeth.sh` (21 for this invariant, 14 for invariant 13). What it does not cover: typryx actually running in
+    run (0700 fresh and tightened, an old typryx refused); 43 typed cases in
+    `gates-have-teeth.sh` (21 for this invariant, 22 for invariant 13). What it does not cover: typryx actually running in
     each mode, and the key staying out of the running process's arguments and
     log. That half was shown by hand in the pull request that added this
     invariant, not by a script, because it needs a built typryx and a free
@@ -341,9 +342,22 @@ building here and the thing that most often gets skipped.
     one writer, and `agent-conform` now verifies it), and the training log would
     copy every tool call's arguments. "Only the broker can reach it" is as strong
     as a loopback bind on one machine: any local process can, and it carries no
-    key because the broker cannot add an `X-Typryx-Key` header.
+    key because the broker cannot add an `X-Typryx-Key` header. Deadlines,
+    aligned with stack-single#88: the proxy asks its backend before it forwards
+    the decision, and typryx's own default ask deadline of 150 ms drops a hosted
+    answer (Jev median 229 ms) and a local-model answer (qwen2.5:7b median
+    2130 ms on 8 vCPU), after which the call is forwarded with no signal and a
+    `hold_if_signal` rule never fires, silently. So `TYPRYX_PROXY_ASK_TIMEOUT_MS`
+    is 3000 (`RISK_ASK_TIMEOUT_MS`; longer than the longest measured answer and
+    inside typryx's 1 to 5000), and the broker's decide deadline is
+    `TOKENFUSE_MCP_WARDRYX_TIMEOUT_MS=7000` (`RISK_DECIDE_TIMEOUT_MS`; the variable
+    tokenfuse reads for a decide that carries a tool call, longer than the ask).
+    The LLM gateway's own wardryx timeout (2000) is not touched: it never goes
+    through the proxy. `typryx`'s own backend deadline `TYPRYX_TIMEOUT_MS` (2 s by
+    default, passed through unchanged) is separate: a local model slower than that
+    still needs it exported.
     *(gate: `scripts/typed-mode.sh`, section 9 through `--typed-plan` and 7b
-    statically, 46 checks, and 14 cases in `gates-have-teeth.sh`. Not covered: the
+    statically, 51 checks, and 22 cases in `gates-have-teeth.sh`. Not covered: the
     proxy running in front of a real wardryx behind this broker with a policy that
     holds; shown by hand in the pull request that added this, not by a script,
     because it needs built binaries and free ports.)*
@@ -378,6 +392,23 @@ building here and the thing that most often gets skipped.
     *(gate: `scripts/chain-verify-routine.sh`, 11 checks against a stand-in
     verifier, teeth in `gates-have-teeth.sh`. Not covered: the real verifier on a
     real bus, shown by hand in the pull request that added this.)*
+
+16. **`up.sh` leaves with the status it was exiting with.** `@claude 2026-10-04`:
+    `die` runs `exit 1`, and the EXIT trap's `cleanup` used to end in a hard-coded
+    `exit 0`, so from the moment the trap was armed every refusal ("the gateway
+    did not come up", "needs a gateway built from tokenfuse v1.5.0") printed its
+    error and exited 0, and a script, a CI step or a supervisor driving the
+    launcher read a failed bring-up as a success (measured 2026-10-04, found while
+    running the refusals of the 2026-10-04 releases). Now `cleanup` leaves with
+    the status the script was exiting with; the INT and TERM traps pass 0 (the
+    operator stopping the stack on purpose); the hold loop passes 1, because a
+    plane that died underneath the launcher did not stop it cleanly (this changes
+    that path's status from 0 to 1).
+    *(gate: `scripts/die-keeps-its-exit-status.sh`, which runs the launcher's own
+    `cleanup` and trap lines (cut out of `up.sh`, not copied) with and without a
+    started service, 7 checks, 6 cases in `gates-have-teeth.sh`. Not covered: the
+    whole launcher dying at each of its `die` sites; shown by hand in the pull
+    request that added this for one refusal, a SIGTERM and a killed plane.)*
 
 An approved architecture decision is **not finished** until it is two things: a
 numbered invariant in this file, and a gate in a script if it can be checked

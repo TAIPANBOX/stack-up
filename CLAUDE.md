@@ -39,6 +39,7 @@ bash -n up.sh && bash -n down.sh && bash -n routines.sh
 ./scripts/chain-verify-routine.sh
 ./scripts/manifest-is-true.sh
 ./scripts/features-are-bound.sh
+./scripts/die-keeps-its-exit-status.sh
 ./scripts/gates-have-teeth.sh   # invariant 6; needs a clean tree
 ```
 
@@ -391,6 +392,23 @@ building here and the thing that most often gets skipped.
     *(gate: `scripts/chain-verify-routine.sh`, 11 checks against a stand-in
     verifier, teeth in `gates-have-teeth.sh`. Not covered: the real verifier on a
     real bus, shown by hand in the pull request that added this.)*
+
+16. **`up.sh` leaves with the status it was exiting with.** `@claude 2026-10-04`:
+    `die` runs `exit 1`, and the EXIT trap's `cleanup` used to end in a hard-coded
+    `exit 0`, so from the moment the trap was armed every refusal ("the gateway
+    did not come up", "needs a gateway built from tokenfuse v1.5.0") printed its
+    error and exited 0, and a script, a CI step or a supervisor driving the
+    launcher read a failed bring-up as a success (measured 2026-10-04, found while
+    running the refusals of the 2026-10-04 releases). Now `cleanup` leaves with
+    the status the script was exiting with; the INT and TERM traps pass 0 (the
+    operator stopping the stack on purpose); the hold loop passes 1, because a
+    plane that died underneath the launcher did not stop it cleanly (this changes
+    that path's status from 0 to 1).
+    *(gate: `scripts/die-keeps-its-exit-status.sh`, which runs the launcher's own
+    `cleanup` and trap lines (cut out of `up.sh`, not copied) with and without a
+    started service, 7 checks, 6 cases in `gates-have-teeth.sh`. Not covered: the
+    whole launcher dying at each of its `die` sites; shown by hand in the pull
+    request that added this for one refusal, a SIGTERM and a killed plane.)*
 
 An approved architecture decision is **not finished** until it is two things: a
 numbered invariant in this file, and a gate in a script if it can be checked

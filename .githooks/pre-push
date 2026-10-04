@@ -44,6 +44,7 @@ step "bus file names match sources" "./scripts/bus-files-match-sources.sh"
 step "chain-verify routine" "./scripts/chain-verify-routine.sh"
 step "components.json is true" "./scripts/manifest-is-true.sh"
 step "features are bound" "./scripts/features-are-bound.sh"
+step "refusals keep their exit status" "./scripts/die-keeps-its-exit-status.sh"
 
 echo
 if [ "$fail" -ne 0 ]; then

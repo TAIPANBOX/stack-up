@@ -771,9 +771,22 @@ register() {  # register <name> <pid> <signal>
   echo "$2 $3" > "$PIDS_DIR/$1.pid"
 }
 
+# cleanup [status] - stop everything this run started, then leave with a status.
+#
+# THE STATUS IS NOT ALWAYS 0, and it used to be. `die` runs `exit 1`, the EXIT
+# trap below runs this, and a hard-coded `exit 0` here replaced the 1: from the
+# moment the trap was armed, every refusal ("gateway did not come up", "needs a
+# gateway built from tokenfuse v1.5.0", ...) printed its error and exited 0, so
+# anything driving this launcher read a failed bring-up as a success (measured
+# 2026-10-04). Called by the EXIT trap with no argument, it leaves with the
+# status the script was already exiting with ($? at its first line); called by
+# the INT and TERM traps it is told 0, because that is the operator stopping the
+# stack on purpose; called by the hold loop it is told 1, because a plane died.
+# scripts/die-keeps-its-exit-status.sh runs this function and the trap lines.
 cleanup() {
+  local rc="${1:-$?}"
   trap - INT TERM EXIT
-  [ "${#STARTED[@]}" -eq 0 ] && exit 0
+  [ "${#STARTED[@]}" -eq 0 ] && exit "$rc"
   echo
   log "stopping ..."
   local i entry name pid sig
@@ -804,7 +817,7 @@ cleanup() {
     rm -f "$PIDS_DIR/$name.pid"
   done
   log "stopped."
-  exit 0
+  exit "$rc"
 }
 
 # wait_health <name> <port> <pid> [path] [timeout]
@@ -1278,7 +1291,8 @@ fi
 mkdir -p "$BIN_DIR" || die "could not create $BIN_DIR"
 : > "$EVENTS_FILE"
 
-trap cleanup INT TERM EXIT
+trap cleanup EXIT
+trap 'cleanup 0' INT TERM
 
 # --------------------------------------------------------------------------
 # Build + start: tokenfuse gateway + cloud (mandatory)
@@ -2589,7 +2603,7 @@ while :; do
     name="${entry%%:*}"; pid="${entry#*:}"; pid="${pid%%:*}"
     if ! kill -0 "$pid" 2>/dev/null; then
       warn "$name (pid $pid) exited unexpectedly; see $LOGS_DIR/$name.log. Shutting down."
-      cleanup
+      cleanup 1
     fi
   done
   sleep 2

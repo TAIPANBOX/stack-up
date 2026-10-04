@@ -30,4 +30,4 @@ down.sh routines.sh`, `bash -n` on all three, `scripts/loopback-only.sh`,
 `scripts/gateway-cache-is-off.sh`, `scripts/typed-mode.sh`,
 `scripts/run-budget-ceiling-is-set.sh`, `scripts/bus-files-match-sources.sh`,
 `scripts/chain-verify-routine.sh`, `scripts/manifest-is-true.sh`,
-`scripts/features-are-bound.sh` and `scripts/gates-have-teeth.sh`.
+`scripts/features-are-bound.sh`, `scripts/die-keeps-its-exit-status.sh` and `scripts/gates-have-teeth.sh`.

@@ -634,6 +634,29 @@ run_case "typed-mode: the gateway's own wardryx timeout is changed with the risk
 	"$(py 'edit("up.sh", "TOKENFUSE_WARDRYX_TIMEOUT_MS=\"2000\"", "TOKENFUSE_WARDRYX_TIMEOUT_MS=\"7000\"")')" \
 	"no longer 2000"
 
+# invariant 16: up.sh leaves with the status it was exiting with. die runs exit 1
+# and the EXIT trap runs cleanup; a hard-coded exit 0 there turned every refusal
+# after the trap was armed into a success for whatever was driving the launcher.
+run_case "die-keeps-its-exit-status: cleanup exits 0 with nothing started" fail \
+	'./scripts/die-keeps-its-exit-status.sh' \
+	"$(py 'edit("up.sh", "[ \"$\u007b#STARTED[@]\u007d\" -eq 0 ] && exit \"$rc\"", "[ \"$\u007b#STARTED[@]\u007d\" -eq 0 ] && exit 0")')" \
+	"a failure with nothing started: exit 0, wanted 3"
+
+run_case "die-keeps-its-exit-status: cleanup ends with exit 0 after stopping services" fail \
+	'./scripts/die-keeps-its-exit-status.sh' \
+	"$(py 'edit("up.sh", "  log \"stopped.\"\n  exit \"$rc\"", "  log \"stopped.\"\n  exit 0")')" \
+	"a failure with a service started: exit 0, wanted 4"
+
+run_case "die-keeps-its-exit-status: a deliberate stop reports failure" fail \
+	'./scripts/die-keeps-its-exit-status.sh' \
+	"$(py 'edit("up.sh", "trap \u0027cleanup 0\u0027 INT TERM", "trap \u0027cleanup 1\u0027 INT TERM")')" \
+	"SIGTERM is a deliberate stop: exit 1, wanted 0"
+
+run_case "die-keeps-its-exit-status: a dead plane exits 0 again" fail \
+	'./scripts/die-keeps-its-exit-status.sh' \
+	"$(py 'edit("up.sh", "      cleanup 1\n", "      cleanup\n")')" \
+	"does not call 'cleanup 1'"
+
 echo
 echo "=== and what they must NOT catch ==="
 
@@ -747,6 +770,10 @@ run_case "chain-verify-routine: the routine's comments are reworded" pass \
 run_case "typed-mode: the deadline comment is reworded" pass \
 	'./scripts/typed-mode.sh' \
 	"$(py 'edit("up.sh", "which drops almost every real answer", "which drops most real answers")')"
+
+run_case "die-keeps-its-exit-status: the comment above cleanup is reworded" pass \
+	'./scripts/die-keeps-its-exit-status.sh' \
+	"$(py 'edit("up.sh", "THE STATUS IS NOT ALWAYS 0, and it used to be.", "THE STATUS IS NOT ALWAYS ZERO, and it used to be.")')"
 
 echo
 echo "=== and the one this estate learned the hard way ==="
@@ -931,6 +958,18 @@ t = s.replace("RISK_ASK_TIMEOUT_MS", "RISK_ASKMS")
 assert t != s
 open("up.sh", "w").write(t)')" \
 	"deadlines are unset"
+
+run_case "die-keeps-its-exit-status: no up.sh left to read" fail \
+	'./scripts/die-keeps-its-exit-status.sh' \
+	"$(py 'import subprocess, os
+assert os.path.exists("up.sh"), "expected up.sh"
+subprocess.run(["git", "mv", "up.sh", "up.bash"], check=True)')" \
+	"measured nothing"
+
+run_case "die-keeps-its-exit-status: no cleanup function left to run" fail \
+	'./scripts/die-keeps-its-exit-status.sh' \
+	"$(py 'edit("up.sh", "cleanup() \u007b", "stop_everything() \u007b")')" \
+	"has no cleanup function"
 
 echo
 if [ -n "$(git status --porcelain)" ]; then

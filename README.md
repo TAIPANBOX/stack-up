@@ -754,7 +754,9 @@ Run it in the foreground and Ctrl-C stops everything. If you background it
 `down.sh` only signals the PIDs `up.sh` recorded when it launched each service.
 
 If one service exits on its own, `up.sh` notices within two seconds, names it,
-points at its log, and stops the rest. This is a single-host launcher, not a
+points at its log, and stops the rest, exiting with status 1 (Ctrl-C or SIGTERM is
+a deliberate stop and exits 0; a refusal such as a gateway that will not start exits
+with 1 too, so a script driving `up.sh` can tell). This is a single-host launcher, not a
 supervisor: nothing is restarted, and a half-alive stand would mislead more
 than a stopped one. To watch how the planes behave when one of them is gone
 (the gateway fails open on the policy plane and records it; scopyx fails

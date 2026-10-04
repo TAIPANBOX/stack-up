@@ -110,6 +110,13 @@ env_ordered() {
     || bad "an -u comes after an assignment in the env array, so env would run it as a command"
 }
 
+# The proxy's own env array, same rule: every `-u` before the first assignment.
+proxy_env_ordered() {
+  n=$((n + 1))
+  printf '%s\n' "$out" | awk '/^typed: proxy env: -u /{ if (seen) bad=1; next } /^typed: proxy env: /{ seen=1 } END { exit bad }' \
+    || bad "an -u comes after an assignment in the proxy's env array, so env would run it as a command"
+}
+
 # 1. default off, and --with-typed alone is exactly today's stub.
 expect "no flags"               0 "typryx is not started" -- --typed-plan
 expect "--typed-mode off"       0 "typryx is not started" -- --typed-mode off --typed-plan
@@ -193,6 +200,59 @@ has "env: TYPRYX_TRAINING_DIR=$STACK_UP_HOME/typryx/training"
 has "no backend answer"
 env_ordered
 
+# 9. the typed risk signal (--typed-risk-signal, typryx wardryx-proxy): off
+# unless asked for, refused when typryx or wardryx is not going to run, says
+# what leaves the machine BEFORE anything starts, and the proxy is never a
+# second writer of the service's journal, ledger or training log.
+expect "risk off: plan with --with-typed"      0 "risk signal: off" -- --with-typed --typed-plan
+lacks "risk signal: on"
+lacks "proxy env"
+expect "risk off: no flags at all"             0 "typryx is not started" -- --typed-plan
+lacks "risk signal"
+expect "risk, no typryx to attach to"          2 "--with-typed" -- --typed-risk-signal --typed-plan
+expect "risk under --typed-mode off"           2 "contradict" -- --typed-mode off --typed-risk-signal --typed-plan
+expect "risk with --only money (no wardryx)"   2 "wardryx" -- --with-typed --typed-risk-signal --only money --typed-plan
+expect "risk, stub"                            0 "risk signal: on" -- --with-typed --typed-risk-signal --typed-plan
+has "typryx wardryx-proxy on 127.0.0.1:4330"
+has "only the MCP broker is pointed at it"
+has "the LLM gateway keeps talking to wardryx directly"
+has "risk signal leaves this machine: nothing: the stub backend makes no outbound call"
+has "risk signal policy: none is seeded"
+has "proxy env: -u TYPRYX_EVENTS"
+has "proxy env: -u TYPRYX_LEDGER_DIR"
+has "proxy env: -u TYPRYX_KEYS"
+has "proxy env: -u TYPRYX_TRAINING_DIR"
+has "proxy env: TYPRYX_BACKEND=stub"
+has "proxy env: TYPRYX_PROXY_TEMPLATE=action.risk_class"
+lacks "proxy env: TYPRYX_EVENTS="
+lacks "proxy env: TYPRYX_LEDGER_DIR="
+lacks "proxy env: TYPRYX_KEYS="
+lacks "proxy env: TYPRYX_TRAINING_DIR="
+env_ordered
+proxy_env_ordered
+expect "risk, jev: says the calls go to the hosted API" 0 "risk signal: on" -- --typed-mode jev --typed-key-file "$work/key" --typed-risk-signal --typed-plan
+has "risk signal leaves this machine: the tool name, the arguments and the target of EVERY brokered tool call go to TypeSafe AI's hosted Jev API"
+has "proxy env: TYPRYX_BACKEND=jev"
+has "proxy env: TYPRYX_JEV_KEY_FILE=$work/key"
+has "proxy env: -u TYPRYX_OPENAI_URL"
+env_ordered
+proxy_env_ordered
+expect "risk, own-model: names the server it goes to" 0 "risk signal: on" -- --typed-mode own-model --typed-model-url http://127.0.0.1:11434/v1 --typed-model qwen2.5:7b --typed-risk-signal --typed-plan
+has "go to the model server you named, http://127.0.0.1:11434/v1"
+lacks "TypeSafe AI's hosted"
+has "proxy env: TYPRYX_OPENAI_URL=http://127.0.0.1:11434/v1"
+env_ordered
+proxy_env_ordered
+# The training log belongs to the service. The proxy would copy every tool
+# call's arguments into it, so it never gets the variable, and a stale exported
+# one is unset.
+expect "risk with training: the service logs, the proxy does not" 0 "risk signal: on" -- --with-typed --typed-training --typed-risk-signal --typed-plan
+has "typed: env: TYPRYX_TRAINING_DIR=$STACK_UP_HOME/typryx/training"
+lacks "proxy env: TYPRYX_TRAINING_DIR="
+has "proxy env: -u TYPRYX_TRAINING_DIR"
+env_ordered
+proxy_env_ordered
+
 # 6. refusals and plans never touch the state directory
 n=$((n + 1))
 if [ -e "$STACK_UP_HOME" ]; then
@@ -218,6 +278,75 @@ else
     printf 'FAIL: %s greps the key file without -q, which would print its content:\n%s\n' "$LAUNCHER" "$loud"
   fi
 fi
+
+# 7b. static: who is pointed at the proxy. Only the MCP broker. The LLM gateway
+# keeps talking to wardryx directly (no pending call to classify on the model
+# path, and a hosted backend's latency against the gateway's decision timeout),
+# the proxy runs with no journal or ledger of its own, and the broker's policy
+# gate is switched ON (it is off unless MODE and URL are both set).
+n=$((n + 1))
+risk_static="$(python3 - "$LAUNCHER" <<'PY'
+import re, sys
+text = open(sys.argv[1]).read()
+lines = text.splitlines()
+live = [(i + 1, l) for i, l in enumerate(lines) if not re.match(r"^\s*#", l)]
+
+
+def block_ending_at(lineno):
+    # the backslash-continued command that ends at this line, comments dropped
+    j = lineno
+    while j > 1 and lines[j - 2].rstrip().endswith("\\"):
+        j -= 1
+    return [l for l in lines[j - 1:lineno] if not re.match(r"^\s*#", l)]
+
+
+problems = []
+gateway_starts = [i for i, l in live
+                  if re.match(r'^\s*"\$GATEWAY_BIN"', l) and not re.match(r'^\s*"\$GATEWAY_BIN"\s+mcp-broker(\s|$)', l)]
+broker_starts = [i for i, l in live if re.match(r'^\s*"\$GATEWAY_BIN"\s+mcp-broker(\s|$)', l)]
+if not gateway_starts or not broker_starts:
+    print("NOTHING: found %d gateway start(s) and %d broker start(s)" % (len(gateway_starts), len(broker_starts)))
+    sys.exit(0)
+for i in gateway_starts:
+    b = "\n".join(block_ending_at(i))
+    if "TYPRYX_PROXY" in b or "BROKER_WARDRYX_ENV" in b:
+        problems.append("up.sh:%d: a gateway start names the proxy; only the broker may be pointed at it" % i)
+    if "TOKENFUSE_WARDRYX_URL" in b and not re.search(r'TOKENFUSE_WARDRYX_URL="\$WARDRYX_URL"', b):
+        problems.append("up.sh:%d: the gateway's TOKENFUSE_WARDRYX_URL is not wardryx's own URL" % i)
+for i in broker_starts:
+    b = "\n".join(block_ending_at(i))
+    if "BROKER_WARDRYX_ENV" not in b:
+        problems.append("up.sh:%d: the broker start does not take BROKER_WARDRYX_ENV, so the signal never reaches its policy gate" % i)
+# The array is initialised empty and filled under the flag: read every assignment.
+assigns = re.findall(r"^\s*BROKER_WARDRYX_ENV=\(([^)]*)\)", text, re.M)
+if not assigns:
+    problems.append("up.sh: BROKER_WARDRYX_ENV is never assigned")
+else:
+    env = " ".join(assigns)
+    if 'TOKENFUSE_WARDRYX_URL=http://127.0.0.1:$TYPRYX_PROXY_PORT' not in env:
+        problems.append("up.sh: the broker's TOKENFUSE_WARDRYX_URL is not the proxy's loopback address")
+    if 'TOKENFUSE_WARDRYX_MODE=enforce' not in env:
+        problems.append("up.sh: the broker's policy gate is off without TOKENFUSE_WARDRYX_MODE (it needs MODE and URL both)")
+proxy = [i for i, l in live if re.search(r'wardryx-proxy\s*>', l)]
+if not proxy:
+    problems.append("up.sh: no `typryx wardryx-proxy` launch found")
+for i in proxy:
+    b = "\n".join(block_ending_at(i))
+    for var in ("TYPRYX_EVENTS", "TYPRYX_LEDGER_DIR", "TYPRYX_KEYS", "TYPRYX_TRAINING_DIR"):
+        if re.search(var + "=", b):
+            problems.append("up.sh:%d: the proxy is given %s, which would make it a second writer of the service's files" % (i, var))
+    if not re.search(r'TYPRYX_PROXY_ADDR="127\.0\.0\.1:\$TYPRYX_PROXY_PORT"', b):
+        problems.append("up.sh:%d: the proxy is not bound to loopback on TYPRYX_PROXY_PORT" % i)
+if not re.search(r"^\s*register typryx-wardryx-proxy ", text, re.M):
+    problems.append("up.sh: the proxy is never registered, so down.sh and the hold loop would not see it")
+print("\n".join(problems) if problems else "OK")
+PY
+)"
+case "$risk_static" in
+  OK) ;;
+  NOTHING*) fails=$((fails + 1)); printf 'FAIL: the static risk-signal check measured nothing: %s\n' "$risk_static" ;;
+  *) fails=$((fails + 1)); printf 'FAIL: the typed risk signal is wired wrongly:\n%s\n' "$risk_static" ;;
+esac
 
 # 8b. the two functions the launch itself runs for the training log, cut out of
 # up.sh by name and run here. A copy would only prove the copy.
@@ -269,4 +398,4 @@ if [ "$fails" -gt 0 ]; then
   printf 'FAIL: %d of %d typed-mode check(s) failed.\n' "$fails" "$n"
   exit 1
 fi
-printf 'OK: %d typed-mode checks: default off, refusals before any side effect, the key file is named never read, and the training log is opt-in and private.\n' "$n"
+printf 'OK: %d typed-mode checks: default off, refusals before any side effect, the key file is named never read, the training log is opt-in and private, and the risk signal is opt-in, says what leaves, and reaches only the broker.\n' "$n"

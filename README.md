@@ -42,6 +42,7 @@ Everything binds to `127.0.0.1` only.
 | costcrew | 8321 | The FinOps console, **only with `--with-finops`**. Cloud and AI spend, an agent crew that triages it, and a person who reviews what they wrote. A guest producer: it writes the shared bus and calls nobody, and it enforces nothing. |
 | typryx | 4320 | Typed answers with a probability, **only with `--with-typed`**. A choice, a score, or a yes/no, each with a probability, instead of a sentence a policy cannot threshold. Runs with the free, deterministic `stub` backend unless you choose a data mode (`--typed-mode`, see "Typed answers: choose where your data goes"); without the flag the stack behaves exactly as before. |
 | tokenfuse-mcp-broker | 4200 | tokenfuse's own MCP credential broker, **also with `--with-typed`**, fronting typryx: an agent authenticates to this one door instead of typryx's own. tokenfuse's code is unchanged; this is configuration only. |
+| typryx wardryx-proxy | 4330 | typryx's reverse proxy in front of wardryx, **only with `--typed-risk-signal`** (and only the broker is pointed at it): it adds typryx's risk answer for a brokered tool call to wardryx's decision request as a signal. See "The typed risk signal". |
 
 The money plane (gateway + cloud + dashboard) is mandatory; the rest degrade
 gracefully. If a toolchain or a port is missing, stack-up says so and brings up
@@ -59,6 +60,38 @@ environment only, never as an argument and never in a file; the closing summary
 prints it once, beside the other per-run keys, and clearing a run needs it. A
 restart mints a new one. Nothing in the stack calls the endpoint.
 
+
+### The gateway's run-budget ceiling
+
+A run's budget comes from the header the agent sends (`x-fuse-budget-usd`), from
+a policy default, or from tokenfuse's built-in USD 5, and the next call of an open
+run can widen it. With nothing to stop that, the per-run limit of a gateway with
+no client keys, no identity map and no unit caps is whatever the caller says.
+tokenfuse v1.5.0 adds the operator's ceiling, and `up.sh` sets it on every gateway
+start: **5.00 USD per run by default, `--run-budget-ceiling <usd>` to change it**
+(a positive number with at most six decimals; anything else exits with status 2
+while the arguments are still being read, before anything is built).
+
+```sh
+./up.sh                                  # ceiling 5.00
+./up.sh --run-budget-ceiling 1.50
+./up.sh --plan --run-budget-ceiling 1.50 # prints the figure and exits, starting nothing
+```
+
+5.00 is tokenfuse's own default run budget, so an ordinary run is unchanged and
+only a caller-declared larger budget is clamped. A clamped call's answer carries
+`x-fuse-budget-clamped: <ceiling>`. Measured 2026-10-04 on this launcher, a stack
+brought up with the real `up.sh` over a tokenfuse main build: a call declaring
+`x-fuse-budget-usd: 50` came back with `x-fuse-budget-clamped: 5.00`, a call
+declaring `1.00` carried no such header, and widening the same open run to `500`
+was clamped to `5.00` again.
+
+What it does not do: it is **one figure per run, not per agent** (an agent that
+opens a new run id gets a new ceiling's worth), it does not clamp a budget that
+comes from the Cloud (that is the operator's own word), and it is not applied to
+the MCP broker, which holds no run budget. A gateway built before v1.5.0 ignores
+the setting without saying so, so `up.sh` checks that the gateway binary names
+it: refused when you asked for a figure, a warning when you did not.
 
 ### Delegation, and what leaving it off actually means
 
@@ -386,13 +419,77 @@ here is refused for `no_run_id`, not `unknown_schema` or `unknown_type` -
 counted, not sealed, the same outcome typryx's journal gets for a different
 reason.
 
+### The typed risk signal
+
+`--typed-risk-signal` lets typryx's answer to "how risky is this tool call" reach
+wardryx, so a policy can hold a call for a person. It is off by default, and it is
+refused (status 2, before anything is built) unless typryx is going to run
+(`--with-typed`, or `--typed-mode jev` or `own-model`) and wardryx is (not
+`--only money`):
+
+```sh
+./up.sh --with-typed --typed-risk-signal --plan   # what would start and what would leave
+./up.sh --with-typed --typed-risk-signal
+```
+
+It starts `typryx wardryx-proxy` (typryx v0.4.0) on `127.0.0.1:4330` in front of
+wardryx and points **only the MCP broker** at it. For a brokered `tools/call` the
+broker (tokenfuse v1.5.0) now sends wardryx the call's tool name, arguments and
+target; the proxy asks typryx's `action.risk_class` template about exactly those
+three things and adds the answer to the request as a signal; wardryx v1.2.0 reads
+it through a `hold_if_signal` rule, which can turn an allow into a hold and nothing
+else. The LLM gateway keeps talking to wardryx directly: on the model path there is
+no pending tool call to classify, and a hosted backend's latency would push most
+decisions past the gateway's own timeout. Because the broker's policy gate is off
+unless both its mode and its URL are set, `up.sh` gives the broker
+`TOKENFUSE_WARDRYX_MODE=enforce` (the gateway's own mode here) along with the
+proxy's URL.
+
+**What leaves the machine is the same backend you chose, for every brokered call.**
+With the stub, nothing (and its probabilities carry no information). Under
+`--typed-mode jev`, the tool name, arguments and target of **every** brokered tool
+call go to TypeSafe AI, one ask per call. Under `own-model`, they go only to the
+server you named. `--typed-plan` prints this before anything starts. Each call costs
+one ask, capped by the proxy's own `TYPRYX_MAX_CALLS_PER_HOUR` (typryx's default is
+1000, kept separately from the service's).
+
+**No policy is seeded.** A policy that holds calls is yours to write. This is
+wardryx's own example (its README, "Typed risk signals"), pointed at the broker's
+demo agent:
+
+```sh
+curl -X PUT http://127.0.0.1:8090/v1/policies/risk-hold \
+  -H "Authorization: Bearer devkey" -H "Content-Type: application/json" \
+  -d '{"target":"agent://demo.local/*","hold_if_signal":{"name":"action.risk_class","values":["destructive","external_send","financial"],"min_probability":0.8}}'
+```
+
+Policies written this way live in wardryx's memory for the run (the seeded demo
+policy file is rewritten on every `./up.sh`). Measured 2026-10-04 on this launcher
+with the stub backend: a brokered call with no policy was allowed, and the decision
+event carried the call's name and target and an `action.risk_class` signal from
+`typryx`; after a test policy holding the stub's own answer (`read_only` at 0.3 and
+above, not the example above, because the stub's answers mean nothing) the same call
+was refused with "requires approval" and a wardryx approval id, and a call through
+the gateway still answered 200.
+
+The proxy runs with no journal, no ledger, no keys and no training log, deliberately.
+The typryx service's journal is one hash chain with one writer, and a second process
+appending to it would break the chain the on-box verifier checks; the training log
+would copy every call's arguments. The answer's id travels in the signal, so
+wardryx's own decision record names it. "Only the broker can reach it" is as strong
+as a loopback bind is on one machine: any local process can, and it carries no key
+because the broker cannot add an `X-Typryx-Key` header (typryx refuses a wide bind
+without one, so widening the bind is refused too).
+
 ## What it installs but does not start
 
-Four of the stack's tools are not servers. `qryx` scans a path and exits.
+Five of the stack's tools are not servers. `qryx` scans a path and exits.
 `mockryx` fires crafted requests at a gateway you name and exits. `engram` is a
 library, a CLI, and a stdio-only MCP server over a local file. `verdryx` is a
-CLI over a local file. There is no port to connect to and nothing to keep
-running, so for these "up" means something different:
+CLI over a local file. `agent-conform` is the on-box chain verifier: run by the
+`chain-verify` routine below, it checks the hash chain of every stream in the
+events directory. There is no port to connect to and nothing to keep running, so
+for these "up" means something different:
 
 | Tool | Installed as | Store |
 |---|---|---|
@@ -400,6 +497,7 @@ running, so for these "up" means something different:
 | mockryx | `~/.taipan/bin/mockryx` | none, runs on demand |
 | engram | `~/.taipan/bin/engram-mcp` | `~/.taipan/engram.engram` |
 | verdryx | `~/.taipan/bin/verdryx` | `~/.taipan/verdryx.db` |
+| agent-conform | `~/.taipan/bin/agent-conform` | none; its state is `~/.stack-up/routines/agent-conform.state.json`, its output `~/.stack-up/events/agent-conform.ndjson` |
 
 `~/.taipan` rather than `~/.stack-up` because that is where the rest of the
 stack looks. It is a fixed path, not a search: `qryx` in particular is looked up
@@ -428,7 +526,7 @@ Skip this whole section with `--no-tools`.
 - **Node** and **npm** - only for the dashboard (a one-time static build).
 - **python3** - to serve the dashboard, and to install engram and verdryx into
   their own virtualenvs (3.11+ for those two).
-- **Go** - for wardryx, idryx, heraldyx, scopyx, mockryx and qryx. Skip them with `--only money`.
+- **Go** - for wardryx, idryx, heraldyx, scopyx, mockryx, qryx and agent-conform. Skip them with `--only money`.
   qryx pins a newer Go toolchain than the others and downloads it on the first
   build; that is automatic, and slow exactly once.
 
@@ -552,6 +650,34 @@ missing, or the build fails, `./up.sh` says so and skips just this plane - the
 rest of the stack is unaffected, the same way a missing `go` skips scopyx.
 
 
+### Which file names the readers accept
+
+heraldyx v0.3.0 and idryx v1.1.0 refuse an event whose `source` is not allowed for the
+file it was read from: `<source>.ndjson` carries `<source>`, and `tokenfuse-cloud.ndjson`
+and `tokenfuse-mcp.ndjson` carry `tokenfuse`. Every file this launcher configures is
+one of those (`scripts/bus-files-match-sources.sh` holds the list):
+
+| File under `~/.stack-up/events` | Written by | Source its lines claim |
+|---|---|---|
+| `tokenfuse.ndjson` | the gateway | `tokenfuse` |
+| `tokenfuse-mcp.ndjson` | the MCP broker, `--with-typed` | `tokenfuse` |
+| `wardryx.ndjson` | wardryx | `wardryx` |
+| `scopyx.ndjson` | scopyx | `scopyx` |
+| `vouchryx.ndjson` | vouchryx, `--with-delegation` | `vouchryx` |
+| `costcrew.ndjson` | costcrew, `--with-finops` | `costcrew` |
+| `typryx.ndjson` | typryx, `--with-typed` | `typryx` |
+| `verdryx.ndjson` | the `verdryx-drift` routine | `verdryx` |
+| `agent-conform.ndjson` | the `chain-verify` routine | `agent-conform` |
+
+idryx is loaded with `--load tokenfuse:tokenfuse.ndjson`, in `up.sh` and in the
+`idryx-detect` routine. Measured 2026-10-04 on a real run of `up.sh --with-typed
+--typed-risk-signal --with-delegation --with-finops`: each of the first seven files
+that had a line held only lines claiming the source in its row (`vouchryx.ndjson`
+was still empty), and heraldyx v0.3.0 and idryx v1.1.0, run over that directory,
+printed no refusal and no unknown-stream notice. The `verdryx.ndjson` row is read from
+the routine's code and `agent-conform.ndjson` was run through the `chain-verify`
+routine, not by `up.sh`.
+
 ### Which trust domain it seals
 
 The record plane accepts an event only if its agent id begins
@@ -590,7 +716,7 @@ keeps. Only a total refusal stops the run.
 --no-dashboard     skip building and serving the dashboard
 --no-demo          do not seed the short demo dataset into cloud
 --with demo-fleet  seed a richer fleet into cloud (see "Demo fleet" below)
---no-tools         skip the four installed-not-started tools
+--no-tools         skip the five installed-not-started tools
 --force-install    replace binaries another tool installed
 --workspace <dir>  look here for sibling checkouts before cloning
 --with-typed       also start typryx (typed answers; stub backend unless a mode is chosen)
@@ -599,7 +725,9 @@ keeps. Only a total refusal stops the run.
 --typed-model-url <url>     own-model: the server's base URL, ending in /v1
 --typed-model <name>        own-model: the model name the server knows
 --typed-training   keep typryx's opt-in local training log (off by default; needs typryx v0.3.0+, see "Your own model, on your own data")
---typed-plan       print the resolved typed-answers choice and exit, starting nothing
+--typed-risk-signal  also run typryx wardryx-proxy and point the MCP broker at it (off by default; see "The typed risk signal")
+--run-budget-ceiling <usd>  the most one run may be granted (default 5.00; see "The gateway's run-budget ceiling")
+--plan             print every resolved choice and exit, starting nothing (--typed-plan is the same flag)
 -h, --help         show help
 ```
 
@@ -626,7 +754,7 @@ them, outside the launcher.
 
 The stack produces governance signal on its own, but nobody looks at it
 unless something runs it on a schedule. `routines.sh` is that schedule: it
-installs OS-native timers (systemd on Linux, launchd on macOS) for six
+installs OS-native timers (systemd on Linux, launchd on macOS) for seven
 routines, and it is also the thing those timers invoke.
 
 | Routine | Runs (local time) | What it does |
@@ -636,12 +764,13 @@ routines, and it is also the thing those timers invoke.
 | `verdryx-drift` | daily 06:27 | `verdryx drift` against a baseline you set -> a quality-regression check. |
 | `idryx-detect` | daily 06:37 | `idryx detect` over the tokenfuse event stream -> an identity/access anomaly sweep. |
 | `mockryx-drill` | weekly, Monday 06:47 | a live fire drill against your own gateway. **Opt-in only** - see the warning below. |
+| `chain-verify` | daily 06:52 | `agent-conform watch-dir` over the shared event directory -> every stream's hash chain checked from its first line. A new break becomes one `chain_broken` (high) event in `agent-conform.ndjson`, which heraldyx reads; a break already announced is not announced again, and the routine keeps saying `findings` until it is gone. |
 | `trailryx-seal` | daily 06:57 | `trailryx-node events` over every file in the shared event directory -> a sealed, offline-verifiable record of what the other routines, and the rest of the stack, did. Runs last so it can seal the same day's `verdryx-drift` finding too. |
 
 ```sh
 ./routines.sh list                  # one line per routine: installed? last run?
 ./routines.sh run <name>            # run one now (this is what the scheduler calls)
-./routines.sh install               # install timers for the five safe routines
+./routines.sh install               # install timers for the six safe routines
 ./routines.sh install --with-drill  # also install the weekly drill (see the warning below)
 ./routines.sh uninstall             # remove exactly and only what install created
 ./routines.sh status                # last record per routine, plus the scheduler's own view
@@ -680,8 +809,10 @@ Both use the same shape:
 This is a **stable contract**: the Genaryx console reads it, so its shape
 does not change casually. `status` is one of `ok` (ran, nothing wrong - this
 includes a routine that found something, since finding it is the point of
-running it), `findings` (mockryx-drill specifically: it found a gap, which
-is what a drill is for), `skipped` (a precondition was not met - see
+running it), `findings` (mockryx-drill: it found a gap, which is what a drill is
+for; chain-verify: a hash chain is broken, and it stays `findings` on every later run
+while the break is still there, because the verifier announces a break once and exits
+0 afterwards), `skipped` (a precondition was not met - see
 `reason`), or `error` (a real usage/tool failure - see `reason`).
 
 ### The mockryx-drill warning
@@ -709,6 +840,9 @@ line up numerically - that is expected, not a bug.
   activates the literal bearer `devkey`. That is a **dev credential for a local
   sandbox** and nothing else. Do not run this on a host anything else can reach.
 - `idryx serve` has no authentication of its own by design (loopback only).
+- The gateway clamps one run's caller-declared budget to the run-budget ceiling
+  (5.00 USD by default, `--run-budget-ceiling`; see "The gateway's run-budget
+  ceiling" for what that does and does not bound).
 - The gateway's semantic response cache is off (`TOKENFUSE_CACHE=off`): left
   on, its shadow-mode default serialises every call on one lock instead of
   serving anything (tokenfuse#319).
@@ -749,6 +883,8 @@ Everything that is only stack-up's business stays under `~/.stack-up/`
   pids/        recorded PIDs, used by down.sh
   typryx/      ledger only, only with --with-typed (its journal is now in
                events/typryx.ndjson above; see "Typed answers" above)
+  routines/    routines.sh's own state: history, the latest record per routine,
+               and the chain verifier's state file (agent-conform.state.json)
 ```
 
 Earlier versions kept the binaries in `~/.stack-up/bin`. They are moved on the

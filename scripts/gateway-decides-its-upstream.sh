@@ -78,6 +78,12 @@ BIN_VAR="$(grep -oE '^GATEWAY_BIN="[^"]*"' "$LAUNCHER" | head -1)"
 LAUNCH_LINES=""
 LAUNCH_COUNT=0
 while IFS= read -r n; do
+  # The here-document always delivers one line, empty when grep found nothing,
+  # so without this skip a launcher with NO gateway start counts as one start
+  # and the "measured nothing" refusal below can never fire. Measured
+  # 2026-10-04: both gateway launch lines renamed away, this gate still
+  # exited 0 with "(1 checked)". declassify-is-keyed.sh carries the same skip.
+  [ -n "$n" ] || continue
   LAUNCH_LINES="$LAUNCH_LINES $n"
   LAUNCH_COUNT=$(( LAUNCH_COUNT + 1 ))
 done <<EOF

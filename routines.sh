@@ -4,15 +4,17 @@
 # work (not the agents themselves).
 #
 # The stack produces governance signal on its own: a FinOps export, a crypto-
-# inventory trend, a quality-drift check, an identity-anomaly sweep, a sealed
-# record of it all, and (opt in) a fire drill. Nobody looks at these unless
+# inventory trend, a quality-drift check, an identity-anomaly sweep, a check that
+# the event bus's own hash chains still hold, a sealed record of it all, and
+# (opt in) a fire drill. Nobody looks at these unless
 # something runs them on a schedule, so this script is that schedule: it
 # installs OS-native timers (systemd on Linux, launchd on macOS) that each
 # invoke `routines.sh run <name>` at a fixed time, and it is also the thing
 # those timers invoke.
 #
-# Routines (staggered ten minutes apart in the 06:xx hour so they never
-# collide; each one's own cadence, daily or weekly, is listed below):
+# Routines (staggered in the 06:xx hour so they never collide, ten minutes
+# apart except chain-verify, which sits five minutes before trailryx-seal; each
+# one's own cadence, daily or weekly, is listed below):
 #
 #   focus-export     06:07  tokenfuse-gateway focus-export -> a FOCUS-format
 #                            FinOps CSV from the gateway's own Parquet trace
@@ -29,6 +31,19 @@
 #                            provider's money, and it is deliberately built
 #                            to trip your policies -- that is what a drill
 #                            is for. Never installed unless you ask for it.
+#   chain-verify     06:52  agent-conform watch-dir over the shared event
+#                            directory -> every stream's prev_hash chain checked
+#                            from its first line. A NEW break becomes one
+#                            chain_broken event (high) in the verifier's own
+#                            agent-conform.ndjson, which heraldyx already reads;
+#                            a break already announced is not announced again,
+#                            and the routine still says "findings" until it is
+#                            gone. It writes nothing but that file and its
+#                            state (routines/agent-conform.state.json). It runs
+#                            after every routine that writes an event and
+#                            before the seal, so the seal reads its alert in the
+#                            same pass (counted, not sealed: the record plane
+#                            refuses schema v1.0 as unknown_schema today).
 #   trailryx-seal    06:57  trailryx-node events over every *.ndjson file in
 #                            the shared event directory -> a sealed, offline-
 #                            verifiable record of what the other routines,
@@ -42,7 +57,7 @@
 #   run <name>         run one routine now and record the result. This is
 #                      the entrypoint the OS scheduler invokes; safe to run
 #                      by hand too.
-#   install            install timers for the five safe routines above
+#   install            install timers for the six safe routines above
 #     [--with-drill]   also install the mockryx-drill timer (prints the
 #                      warning above again, first, before touching anything)
 #   uninstall          remove exactly and only what install created, tracked
@@ -132,11 +147,11 @@ LOGS_DIR="$ROUTINES_DIR/logs"
 CONFIG_FILE="$ROUTINES_DIR/config"
 INSTALLED_MANIFEST="$ROUTINES_DIR/installed.txt"
 
-# All six routines, and the five considered safe to install by default.
+# All seven routines, and the six considered safe to install by default.
 # mockryx-drill is opt-in only (--with-drill) and is deliberately never in
 # DEFAULT_ROUTINES.
-ROUTINE_NAMES=(focus-export qryx-trend verdryx-drift idryx-detect mockryx-drill trailryx-seal)
-DEFAULT_ROUTINES=(focus-export qryx-trend verdryx-drift idryx-detect trailryx-seal)
+ROUTINE_NAMES=(focus-export qryx-trend verdryx-drift idryx-detect mockryx-drill chain-verify trailryx-seal)
+DEFAULT_ROUTINES=(focus-export qryx-trend verdryx-drift idryx-detect chain-verify trailryx-seal)
 
 # --------------------------------------------------------------------------
 # Small helpers (verbatim from up.sh/down.sh, so every stack-up script logs
@@ -177,8 +192,8 @@ load_config() {
 now_rfc3339() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
 # --------------------------------------------------------------------------
-# Schedule: every routine runs at :07/:17/:27/:37/:47 past 06:00, so five
-# routines with real (if small) work never start in the same minute. Only
+# Schedule: every routine runs at :07/:17/:27/:37/:47/:52/:57 past 06:00, so
+# seven routines with real (if small) work never start in the same minute. Only
 # mockryx-drill is weekly (Monday); the rest are daily.
 # --------------------------------------------------------------------------
 
@@ -191,6 +206,7 @@ routine_minute() {
     verdryx-drift) echo 27 ;;
     idryx-detect)  echo 37 ;;
     mockryx-drill) echo 47 ;;
+    chain-verify)  echo 52 ;;
     trailryx-seal) echo 57 ;;
   esac
 }
@@ -292,7 +308,7 @@ PY
 }
 
 # --------------------------------------------------------------------------
-# The six routines. Each checks its own preconditions and, if any are
+# The seven routines. Each checks its own preconditions and, if any are
 # unmet, records "skipped" with an exact reason and returns -- a skip is not
 # a failure. Every real invocation writes its output to its own truncated
 # log ($LOGS_DIR/<name>.log) first, then the routine derives its summary by
@@ -550,6 +566,77 @@ routine_mockryx_drill() {
   esac
 }
 
+# chain-verify: the bus's own integrity check, on the same cadence as the rest.
+#
+# `agent-conform watch-dir` (agent-stack-go v1.1.0, agent-stack-go#66) walks every
+# *.ndjson in the one flat events directory and verifies each file's prev_hash
+# chain from its first line. Measured 2026-09-17 on the appliance proving run
+# (agent-stack-go#64): one byte flipped on a sealed line of the shared bus was
+# seen by nothing, because the planes were past it by offset. This is the part
+# that looks again.
+#
+# What it writes, and only this: a chain_broken (high) or chain_unchained (low)
+# event per NEW finding to $EVENTS_DIR/agent-conform.ndjson, its own chained
+# stream, whose name is the source its events claim (heraldyx and idryx refuse a
+# file whose name is not its source), and a state file that remembers which
+# (file, kind, line) it already announced, kept under routines/ and not in the
+# events directory because it is not a stream.
+#
+# Exit codes of the tool: 0 nothing NEW, 1 a NEW chain_broken, 2 it could not do
+# its job (a missing directory, no stream, an unreadable file, an unwritable
+# output). Mapped the way mockryx-drill's are: 1 is findings, 2 is an error.
+#
+# THE TRAP THIS ROUTINE CLOSES ITSELF: a break is announced ONCE, so the second
+# daily run exits 0 on a bus that is still broken. Recording that as ok would
+# turn a standing break into a green history after the first night. The tool
+# prints a FAIL line for every break it sees, announced or not, so a clean exit
+# with a FAIL line in the log is "findings", saying the break is already known.
+routine_chain_verify() {
+  local ac="$BIN_DIR/agent-conform"
+  if [ ! -x "$ac" ]; then
+    RESULT_STATUS=skipped; RESULT_EXIT_CODE=0
+    RESULT_REASON="missing executable $ac"
+    return
+  fi
+  shopt -s nullglob
+  local files=("$EVENTS_DIR"/*.ndjson)
+  shopt -u nullglob
+  if [ "${#files[@]}" -eq 0 ]; then
+    RESULT_STATUS=skipped; RESULT_EXIT_CODE=0
+    RESULT_REASON="no event files in $EVENTS_DIR yet"
+    return
+  fi
+
+  local log="$LOGS_DIR/chain-verify.log"
+  : > "$log"
+  "$ac" watch-dir -out "$EVENTS_DIR/agent-conform.ndjson" \
+    -state "$ROUTINES_DIR/agent-conform.state.json" "$EVENTS_DIR" >"$log" 2>&1
+  local rc=$?
+  RESULT_EXIT_CODE=$rc
+  local known first
+  first="$(grep -m1 '^FAIL ' "$log" 2>/dev/null)"
+  case "$rc" in
+    0)
+      if [ -n "$first" ]; then
+        known="$(grep -c '^FAIL ' "$log" 2>/dev/null)"
+        RESULT_STATUS=findings
+        RESULT_REASON="$known break(s) already announced and still there: $first"
+        RESULT_SUMMARY="$(tail -n1 "$log" 2>/dev/null)"
+      else
+        RESULT_STATUS=ok
+        RESULT_SUMMARY="$(tail -n1 "$log" 2>/dev/null)"
+      fi ;;
+    1)
+      RESULT_STATUS=findings
+      RESULT_REASON="$first"
+      RESULT_SUMMARY="$(tail -n1 "$log" 2>/dev/null)" ;;
+    *)
+      RESULT_STATUS=error
+      RESULT_REASON="$(tail -n1 "$log" 2>/dev/null)"
+      RESULT_SUMMARY="agent-conform watch-dir exited $rc" ;;
+  esac
+}
+
 # trailryx-seal: the record plane's own timer. up.sh already runs this exact
 # command once, right after the demo; this is what keeps the record current
 # for events that arrive afterwards (real gateway traffic, a later scopyx
@@ -764,6 +851,7 @@ cmd_run() {
     verdryx-drift) routine_verdryx_drift ;;
     idryx-detect)  routine_idryx_detect ;;
     mockryx-drill) routine_mockryx_drill ;;
+    chain-verify)  routine_chain_verify ;;
     trailryx-seal) routine_trailryx_seal ;;
   esac
 
@@ -1042,7 +1130,7 @@ cmd_install() {
     warn "through your local gateway to whatever LLM provider is configured"
     warn "there. That traffic can spend that provider's money, and the drill is"
     warn "deliberately built to trip your policies -- that is what a fire drill"
-    warn "is for. Installing its timer alongside the five safe routines."
+    warn "is for. Installing its timer alongside the six safe routines."
   fi
 
   ensure_dirs

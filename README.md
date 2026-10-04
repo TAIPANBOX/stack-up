@@ -47,6 +47,18 @@ The money plane (gateway + cloud + dashboard) is mandatory; the rest degrade
 gracefully. If a toolchain or a port is missing, stack-up says so and brings up
 what it can, rather than failing the whole run.
 
+### The gateway's declassify key
+
+The gateway's `POST /v1/fuse/declassify` lifts a run's taint label (the release
+valve for its agent firewall: a person reviews a run and the label comes off).
+It is not behind the money plane's key. It has a key of its own,
+`x-fuse-declassify-key`, and the gateway treats it as optional, so with none set
+anything that reaches the gateway port could clear a run. `up.sh` therefore mints
+one fresh on every run and hands it to the gateway through its process
+environment only, never as an argument and never in a file; the closing summary
+prints it once, beside the other per-run keys, and clearing a run needs it. A
+restart mints a new one. Nothing in the stack calls the endpoint.
+
 
 ### Delegation, and what leaving it off actually means
 

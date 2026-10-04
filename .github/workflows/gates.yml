@@ -36,6 +36,9 @@ jobs:
       - name: every gateway start turns the semantic cache off
         run: ./scripts/gateway-cache-is-off.sh
 
+      - name: every gateway start gets a per-run declassify key, in its environment only
+        run: ./scripts/declassify-is-keyed.sh
+
       - name: the revocation key is never logged
         run: ./scripts/revoke-key-not-printed.sh
 

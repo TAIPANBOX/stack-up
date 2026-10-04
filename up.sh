@@ -1354,6 +1354,26 @@ if [ "$WITH_DELEGATION" -eq 1 ]; then
   fi
 fi
 
+# The gateway's declassify key, minted fresh for this run and handed to the
+# gateway through its process environment only (see the two starts below), the
+# way every other per-run key here is.
+#
+# POST /v1/fuse/declassify lifts a run's taint label, the release valve for the
+# gateway's agent firewall. It is not behind the admin key; its own key,
+# TOKENFUSE_DECLASSIFY_KEY (presented as `x-fuse-declassify-key`), is OPTIONAL in
+# the gateway, and with it unset anything that can reach the gateway port can
+# clear a run, recorded only as `authenticated: false`. Nothing in this stack
+# calls the endpoint, so a key only this operator was shown closes it by default
+# and breaks nothing.
+#
+# The refusal below is load-bearing, not tidiness: the gateway reads an EMPTY
+# value as unset, so a mint that quietly produced nothing would start the
+# gateway with the endpoint open and report nothing.
+# scripts/declassify-is-keyed.sh holds both halves.
+GATEWAY_DECLASSIFY_KEY="$(rand_hex 24)"
+[ -n "$GATEWAY_DECLASSIFY_KEY" ] \
+  || die "could not mint the gateway's declassify key (no openssl, and /dev/urandom gave nothing); refusing to start a gateway whose declassify endpoint would be open."
+
 log "starting gateway on :$GATEWAY_PORT (enforce, stub upstream, reporting to the cloud)"
 if [ -n "$WARDRYX_URL" ]; then
   # ${a[@]+"${a[@]}"} and not "${a[@]}": under `set -u` bash 3.2, which is what
@@ -1365,6 +1385,11 @@ if [ -n "$WARDRYX_URL" ]; then
   # defaults to shadow mode, which takes one global mutex per call and walks
   # up to 10,000 cached entries computing cosine similarity, serving nothing.
   # tokenfuse#319.
+  # TOKENFUSE_DECLASSIFY_KEY is a prefix assignment BEFORE `env`, not an
+  # argument to it: env would put the value on its own command line for the
+  # moment before it execs the gateway, where `ps` can read it. A prefix
+  # assignment lands in the environment of the process only.
+  TOKENFUSE_DECLASSIFY_KEY="$GATEWAY_DECLASSIFY_KEY" \
   env ${DELEG_ENV[@]+"${DELEG_ENV[@]}"} \
   TOKENFUSE_ADDR="127.0.0.1:$GATEWAY_PORT" \
   TOKENFUSE_ALLOW_STUB="1" \
@@ -1389,6 +1414,11 @@ else
   # defaults to shadow mode, which takes one global mutex per call and walks
   # up to 10,000 cached entries computing cosine similarity, serving nothing.
   # tokenfuse#319.
+  # TOKENFUSE_DECLASSIFY_KEY is a prefix assignment BEFORE `env`, not an
+  # argument to it: env would put the value on its own command line for the
+  # moment before it execs the gateway, where `ps` can read it. A prefix
+  # assignment lands in the environment of the process only.
+  TOKENFUSE_DECLASSIFY_KEY="$GATEWAY_DECLASSIFY_KEY" \
   env ${DELEG_ENV[@]+"${DELEG_ENV[@]}"} \
   TOKENFUSE_ADDR="127.0.0.1:$GATEWAY_PORT" \
   TOKENFUSE_ALLOW_STUB="1" \
@@ -2223,6 +2253,8 @@ fi
 echo
 log "events:  $EVENTS_DIR"
 log "logs:    $LOGS_DIR"
+log "declassify: POST http://127.0.0.1:$GATEWAY_PORT/v1/fuse/declassify clears a run's taint label and needs the header"
+log "         x-fuse-declassify-key: $GATEWAY_DECLASSIFY_KEY   (minted fresh this run, held in the gateway's environment only)"
 if [ "$WITH_DELEGATION" -eq 1 ]; then
   log "revoke:  POST http://127.0.0.1:$VOUCHRYX_PORT/v1/revoke   (bearer: key in $DELEG_DIR/revoke.key)"
   log "         survives a restart: ./down.sh then ./up.sh keeps every revocation in force"

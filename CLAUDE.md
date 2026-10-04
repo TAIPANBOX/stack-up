@@ -31,6 +31,7 @@ bash -n up.sh && bash -n down.sh && bash -n routines.sh
 ./scripts/one-trust-domain.sh
 ./scripts/gateway-decides-its-upstream.sh
 ./scripts/gateway-cache-is-off.sh
+./scripts/declassify-is-keyed.sh
 ./scripts/revoke-key-not-printed.sh
 ./scripts/typed-mode.sh
 ./scripts/gates-have-teeth.sh   # invariant 6; needs a clean tree
@@ -244,6 +245,36 @@ building here and the thing that most often gets skipped.
     run by hand in the pull request that added it, not by a script. typryx is
     built from whatever checkout is found, no tag is pinned, so a run on an
     older checkout is caught only by the launch-time refusal, not by the plan.)*
+
+11. **The gateway's declassify key is minted per run and reaches the gateway
+    through its environment only.** `@decided 2026-10-04` (estate audit, wave 1):
+    the tokenfuse gateway's `POST /v1/fuse/declassify` lifts a run's taint
+    label, the release valve for its agent firewall. It is not behind the
+    money plane's key; its own credential, `TOKENFUSE_DECLASSIFY_KEY` (presented
+    as `x-fuse-declassify-key`), is optional in the gateway, and with it unset
+    anything that can reach the gateway port can clear a run, recorded only as
+    `authenticated: false`. This launcher set none. `up.sh` now mints
+    `GATEWAY_DECLASSIFY_KEY` with `rand_hex 24` before the first gateway start,
+    refuses to continue on an empty result (the gateway reads an empty value as
+    unset, so a failed mint would leave the endpoint open without a word), and
+    gives it to each gateway start as a PREFIX assignment ahead of `env`, not an
+    argument to it: an argument to `env` is on its command line for the moment
+    before it execs the gateway. The closing summary prints the key once with
+    the URL it opens and says it is held in the gateway's environment only and
+    minted fresh each run, the posture typryx's and the broker's per-run keys
+    already have. Nothing in this estate calls the endpoint, so minting a key
+    closes it by default and breaks nothing. The reader is tokenfuse's
+    `declassify.rs`, declared in its `components.json`.
+    *(gate: `scripts/declassify-is-keyed.sh`, subjects found like invariant 9's
+    (every `"$GATEWAY_BIN"` command-position start, `mcp-broker` excluded); it
+    requires a variable-valued `TOKENFUSE_DECLASSIFY_KEY` on each start ahead of
+    any `env`, a `rand_hex` mint above the first start, and the refusal after
+    it; refuses to report OK with no up.sh, no `GATEWAY_BIN` or no start to
+    judge; teeth in `scripts/gates-have-teeth.sh`. Not covered: a running
+    gateway actually refusing a call with no key, which needs a built gateway;
+    and that a value in the process environment is private: it is on no command
+    line, but the same user can read it (`/proc/<pid>/environ` on Linux, `ps eww`
+    on macOS).)*
 
 An approved architecture decision is **not finished** until it is two things: a
 numbered invariant in this file, and a gate in a script if it can be checked

@@ -217,6 +217,64 @@ run_case "gateway-cache-is-off: one gateway start drops TOKENFUSE_CACHE" fail \
 	"$(py 'edit("up.sh", "  TOKENFUSE_CACHE=\"off\" \\", "")')" \
 	"does not set TOKENFUSE_CACHE"
 
+# invariant 11: the gateway's declassify key is minted per run and reaches the
+# gateway through its environment only. POST /v1/fuse/declassify lifts a run's
+# taint label and its credential is optional in the gateway, so a start without
+# the key leaves the endpoint open to anything that reaches the gateway port.
+# edit() replaces only the first occurrence, so the other start still sets it.
+run_case "declassify-is-keyed: one gateway start drops TOKENFUSE_DECLASSIFY_KEY" fail \
+	'./scripts/declassify-is-keyed.sh' \
+	"$(py 'edit("up.sh", "  TOKENFUSE_DECLASSIFY_KEY=\"$GATEWAY_DECLASSIFY_KEY\" \\\n", "")')" \
+	"does not set TOKENFUSE_DECLASSIFY_KEY"
+
+# A literal: a key committed to a public repository is no key.
+run_case "declassify-is-keyed: the key becomes a literal" fail \
+	'./scripts/declassify-is-keyed.sh' \
+	"$(py 'edit("up.sh", "TOKENFUSE_DECLASSIFY_KEY=\"$GATEWAY_DECLASSIFY_KEY\"", "TOKENFUSE_DECLASSIFY_KEY=\"fixed-key\"")')" \
+	"not set from a variable"
+
+# The gateway is started as `env VAR=... bin`. An argument to env is on env's
+# own command line for the moment before it execs, where ps can read it; a
+# prefix assignment ahead of env is not.
+run_case "declassify-is-keyed: the key becomes an argument to env" fail \
+	'./scripts/declassify-is-keyed.sh' \
+	"$(py 'edit("up.sh", "  TOKENFUSE_DECLASSIFY_KEY=\"$GATEWAY_DECLASSIFY_KEY\" \\\n  env ${DELEG_ENV[@]+\"${DELEG_ENV[@]}\"} \\\n", "  env ${DELEG_ENV[@]+\"${DELEG_ENV[@]}\"} \\\n  TOKENFUSE_DECLASSIFY_KEY=\"$GATEWAY_DECLASSIFY_KEY\" \\\n")')" \
+	"is an argument to env"
+
+# Minted, but not fresh: one key for every run is a published key.
+run_case "declassify-is-keyed: the mint becomes a fixed string" fail \
+	'./scripts/declassify-is-keyed.sh' \
+	"$(py 'edit("up.sh", "GATEWAY_DECLASSIFY_KEY=\"$(rand_hex 24)\"", "GATEWAY_DECLASSIFY_KEY=\"fixed-key\"")')" \
+	"never minted with rand_hex"
+
+# The mint below the first start: the first gateway runs with an empty key,
+# which the gateway reads as unset.
+run_case "declassify-is-keyed: the mint moves below the first gateway start" fail \
+	'./scripts/declassify-is-keyed.sh' \
+	"$(py 'import re
+s = open("up.sh").read()
+m = re.search(r"^GATEWAY_DECLASSIFY_KEY=\"\$\(rand_hex 24\)\"\n\[ -n [^\n]*\n[^\n]*\n", s, re.M)
+assert m, "mint block not found"
+blk = m.group(0)
+t = s.replace(blk, "", 1)
+anchor = "register gateway \"$!\" INT\n"
+assert anchor in t
+t = t.replace(anchor, anchor + blk, 1)
+assert t != s
+open("up.sh", "w").write(t)')" \
+	"is minted after the first gateway start"
+
+# The gateway reads an EMPTY key as unset. A mint that fails quietly must stop
+# the launcher, not start the gateway with the endpoint open.
+run_case "declassify-is-keyed: the refusal on an empty mint is removed" fail \
+	'./scripts/declassify-is-keyed.sh' \
+	"$(py 'import re
+s = open("up.sh").read()
+t = re.sub(r"\[ -n \"\$GATEWAY_DECLASSIFY_KEY\" \] \\\n  \|\| die [^\n]*\n", "", s, count=1)
+assert t != s
+open("up.sh", "w").write(t)')" \
+	"no refusal on an empty"
+
 # The two launchers drift apart on the trust domain. This is the edit an
 # operator makes when the seal imports nothing: change the one they found,
 # leave the other, and the same records directory is then sealed under one
@@ -377,6 +435,22 @@ run_case "gateway-cache-is-off: a second mcp-broker start is not mistaken for a 
 	'./scripts/gateway-cache-is-off.sh' \
 	"$(py 'edit("up.sh", "\n  register tokenfuse-mcp-broker \"$!\" TERM\n", "\n  register tokenfuse-mcp-broker \"$!\" TERM\n  TOKENFUSE_MCP_ADDR=\"127.0.0.1:9999\" \\\n    \"$GATEWAY_BIN\" mcp-broker > /dev/null 2>&1 &\n")')"
 
+# The broker is the same binary on a subcommand and never serves the route, so a
+# second such start, with a variable of its own, must not be judged a gateway.
+run_case "declassify-is-keyed: a second mcp-broker start is not mistaken for a gateway start" pass \
+	'./scripts/declassify-is-keyed.sh' \
+	"$(py 'edit("up.sh", "\n  register tokenfuse-mcp-broker \"$!\" TERM\n", "\n  register tokenfuse-mcp-broker \"$!\" TERM\n  TOKENFUSE_MCP_ADDR=\"127.0.0.1:9999\" \\\n    \"$GATEWAY_BIN\" mcp-broker > /dev/null 2>&1 &\n")')"
+
+# An unrelated variable added to the same continued block must not hide the key.
+run_case "declassify-is-keyed: an unrelated var added to the block" pass \
+	'./scripts/declassify-is-keyed.sh' \
+	"$(py 'edit("up.sh", "TOKENFUSE_CLOUD_KEY=\"devkey\" \\\n", "TOKENFUSE_CLOUD_KEY=\"devkey\" \\\nTOKENFUSE_SPARE=\"1\" \\\n")')"
+
+# A reworded comment beside the mint is not a change to the key.
+run_case "declassify-is-keyed: the comment above the mint is reworded" pass \
+	'./scripts/declassify-is-keyed.sh' \
+	"$(py 'edit("up.sh", "The refusal below is load-bearing, not tidiness", "The refusal below is load-bearing, not mere tidiness")')"
+
 # AND THE FIX MUST NOT BECOME A NEW HOLE. If the exclusion matched on ANYTHING
 # mentioning "mcp-broker" rather than on the subcommand position right after
 # the binary, a real gateway start missing its precondition, with an unrelated
@@ -429,6 +503,23 @@ run_case "gateway-cache-is-off: no up.sh left to read" fail \
 assert os.path.exists("up.sh"), "expected up.sh"
 subprocess.run(["git", "mv", "up.sh", "up.bash"], check=True)')" \
 	"measured nothing"
+
+run_case "declassify-is-keyed: no up.sh left to read" fail \
+	'./scripts/declassify-is-keyed.sh' \
+	"$(py 'import subprocess, os
+assert os.path.exists("up.sh"), "expected up.sh"
+subprocess.run(["git", "mv", "up.sh", "up.bash"], check=True)')" \
+	"measured nothing"
+
+# The gateway start renamed out from under the gate: its launch lines are how
+# it finds its subjects, and it must say it found none rather than report OK.
+run_case "declassify-is-keyed: no gateway start left to judge" fail \
+	'./scripts/declassify-is-keyed.sh' \
+	"$(py 's = open("up.sh").read()
+t = s.replace("\"$GATEWAY_BIN\" > \"$LOGS_DIR/gateway.log\" 2>&1 &", "gateway_launcher > \"$LOGS_DIR/gateway.log\" 2>&1 &")
+assert t != s
+open("up.sh", "w").write(t)')" \
+	"nowhere, so this measured nothing"
 
 run_case "loopback-only: no launcher left to read" fail \
 	'./scripts/loopback-only.sh' \

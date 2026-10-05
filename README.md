@@ -11,7 +11,7 @@ with no orphaned processes.
 
 <div align="center">
 
-<img src="assets/diagram.svg" alt="Six processes on a fixed loopback port map, every one bound to 127.0.0.1 only, with heraldyx pinned to file mode so it writes what it would have mailed and opens no socket. Nothing leaves the machine, which is what makes this a sandbox rather than a deployment" width="960">
+<img src="assets/diagram.svg" alt="Seven processes on a fixed loopback port map, every one bound to 127.0.0.1 only, with heraldyx pinned to file mode so it writes what it would have mailed and opens no socket. Nothing leaves the machine, which is what makes this a sandbox rather than a deployment" width="960">
 
 </div>
 
@@ -537,7 +537,7 @@ Skip this whole section with `--no-tools`.
 - **Node** and **npm** - only for the dashboard (a one-time static build).
 - **python3** - to serve the dashboard, and to install engram and verdryx into
   their own virtualenvs (3.11+ for those two).
-- **Go** - for wardryx, idryx, heraldyx, scopyx, mockryx, qryx and agent-conform. Skip them with `--only money`.
+- **Go** - for wardryx, idryx, heraldyx, scopyx, mockryx, qryx and agent-conform, plus the opt-in vouchryx (`--with-delegation`), costcrew (`--with-finops`) and typryx (`--with-typed`). Skip them with `--only money`.
   qryx pins a newer Go toolchain than the others and downloads it on the first
   build; that is automatic, and slow exactly once.
 
@@ -726,8 +726,12 @@ keeps. Only a total refusal stops the run.
 --only money       just the money plane (gateway + cloud + dashboard)
 --no-dashboard     skip building and serving the dashboard
 --no-demo          do not seed the short demo dataset into cloud
---with demo-fleet  seed a richer fleet into cloud (see "Demo fleet" below)
+--with demo-fleet  seed a richer fleet into cloud (see "Demo fleet" above)
 --no-tools         skip the five installed-not-started tools
+--no-notify        skip heraldyx, the notifier (it is pinned to file mode and sends no mail either way)
+--no-egress        skip scopyx, the web-egress enforcement point
+--with-delegation  also start vouchryx, the delegation-token service, and open the gateway's delegation door against it
+--with-finops      also start costcrew, the FinOps console, wired to this launcher's bus
 --force-install    replace binaries another tool installed
 --workspace <dir>  look here for sibling checkouts before cloning
 --with-typed       also start typryx (typed answers; stub backend unless a mode is chosen)

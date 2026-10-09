@@ -32,6 +32,7 @@ bash -n up.sh && bash -n down.sh && bash -n routines.sh
 ./scripts/gateway-decides-its-upstream.sh
 ./scripts/gateway-cache-is-off.sh
 ./scripts/declassify-is-keyed.sh
+./scripts/cloud-key-is-per-run.sh
 ./scripts/revoke-key-not-printed.sh
 ./scripts/typed-mode.sh
 ./scripts/run-budget-ceiling-is-set.sh
@@ -409,6 +410,42 @@ building here and the thing that most often gets skipped.
     started service, 7 checks, 6 cases in `gates-have-teeth.sh`. Not covered: the
     whole launcher dying at each of its `die` sites; shown by hand in the pull
     request that added this for one refusal, a SIGTERM and a killed plane.)*
+
+17. **The tokenfuse cloud holds one key minted for the run, and every caller of
+    the cloud uses that key.** `@claude 2026-10-09`: tokenfuse#380 removes the
+    cloud's `devkey` fallback. A cloud started with `TOKENFUSE_CLOUD_ALLOW_DEVKEY`
+    set logs an ERROR and exits 2, and an empty `TOKENFUSE_CLOUD_KEYS`
+    authenticates nobody, so this launcher, which ran the cloud exactly that way,
+    would stop at "cloud did not come up". `up.sh` now mints `CLOUD_KEY` with
+    `rand_hex 16` above the first gateway start (the gateway starts first and is
+    handed the key at its start), refuses to continue on an empty result, and
+    starts the cloud with `TOKENFUSE_CLOUD_KEYS="$CLOUD_KEY:default:admin"` (the
+    org, role and no-site the old fallback had). The gateway gets it as
+    `TOKENFUSE_CLOUD_KEY`, a prefix assignment ahead of `env` like the declassify
+    key; the demo seed, the dashboard link and the closing summary carry the same
+    key, and the summary prints it once. `STACK_UP_CLOUD_KEY` replaces the minted
+    key with the operator's own, refused at argument parsing (exit 2) unless it
+    is 16 to 128 characters from `A-Z a-z 0-9 . _ ~ -`, because it is written into
+    a `key:org:role` spec and a URL query. Nothing sets
+    `TOKENFUSE_CLOUD_ALLOW_DEVKEY`. Scope is the cloud's key only: wardryx's own
+    dev-key mode (`WARDRYX_ALLOW_DEVKEY`, the `devkey` placeholder in
+    `TOKENFUSE_WARDRYX_KEY` and `SCOPYX_WARDRYX_KEY`) is a separate decision and
+    unchanged. The quiet failure this guards is the gateway: handed a key the
+    cloud does not hold, it starts, meters every call and gets a 401 on every
+    push to the cloud, which only its own log shows.
+    *(gate: `scripts/cloud-key-is-per-run.sh`: no non-comment
+    `TOKENFUSE_CLOUD_ALLOW_DEVKEY=`; every cloud start sets `TOKENFUSE_CLOUD_KEYS`
+    from one variable; that variable minted with `rand_hex` above the first
+    gateway start with the refusal after it; every gateway start sets
+    `TOKENFUSE_CLOUD_KEY` from the same variable ahead of `env`; every other use
+    of the cloud's credential (a logical line naming `CLOUD_PORT`) presents that
+    variable and never `devkey`; refuses to report OK with no up.sh, no cloud
+    start, no gateway start or no cloud call to judge. 15 cases in
+    `gates-have-teeth.sh`, `features/the-cloud-key-is-minted-per-run.feature`.
+    Not covered: a running cloud accepting the key and refusing `devkey`, which
+    needs a built cloud; and that the key is private: it is printed in the
+    summary and the dashboard link on purpose, and the seed's `curl` carries it
+    on its command line for the moment it runs.)*
 
 An approved architecture decision is **not finished** until it is two things: a
 numbered invariant in this file, and a gate in a script if it can be checked

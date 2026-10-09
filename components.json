@@ -123,6 +123,10 @@
         "built_from_main_with_minimum_releases": {
           "value": "no tag pinned; a setting a newer release added is judged at launch by the binary naming it",
           "why": "@claude 2026-10-04: this launcher builds every plane from source at whatever commit it finds (see distribution), so nothing here is pinned to the 2026-10-04 releases. What it can and does check is that the binary it is about to run reads the setting it is about to hand it: the gateway must name TOKENFUSE_MAX_RUN_BUDGET_USD (tokenfuse v1.5.0) and typryx must name TYPRYX_PROXY_UPSTREAM (v0.4.0, only under --typed-risk-signal). heraldyx v0.3.0 and idryx v1.1.0 refuse a line whose source its file may not carry; scripts/bus-files-match-sources.sh holds every file name this launcher configures."
+        },
+        "tokenfuse_cloud_key_is_minted_per_run": {
+          "value": "TOKENFUSE_CLOUD_KEYS=\"$CLOUD_KEY:default:admin\", CLOUD_KEY minted with rand_hex 16 per run or taken from STACK_UP_CLOUD_KEY; the gateway's TOKENFUSE_CLOUD_KEY, the demo seed and the dashboard link use the same key; TOKENFUSE_CLOUD_ALLOW_DEVKEY is never set",
+          "why": "@claude 2026-10-09: tokenfuse#380 removes the cloud's devkey fallback; a cloud started with TOKENFUSE_CLOUD_ALLOW_DEVKEY set exits 2 and an empty key set authenticates nobody, which is how this launcher ran the cloud. The key is minted above the first gateway start because the gateway starts first. Wardryx's and scopyx's own dev-key mode (WARDRYX_ALLOW_DEVKEY, SCOPYX_WARDRYX_KEY) is a separate decision and unchanged. Held by scripts/cloud-key-is-per-run.sh, CLAUDE.md invariant 17."
         }
       }
     }

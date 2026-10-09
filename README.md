@@ -22,8 +22,9 @@ cd stack-up
 ```
 
 Then open the link it prints (something like
-`http://127.0.0.1:3000/?base=http://127.0.0.1:8080&key=devkey`) and you are
-looking at your own local money plane.
+`http://127.0.0.1:3000/?base=http://127.0.0.1:8080&key=<this run's key>`) and
+you are looking at your own local money plane. The key is minted fresh on every
+run and printed once in the summary as `cloud key:`.
 
 ## What it starts
 
@@ -32,7 +33,7 @@ Everything binds to `127.0.0.1` only.
 | Service | Port | What it is |
 |---|---|---|
 | tokenfuse-gateway | 4100 | Budget-enforcement proxy for the Anthropic Messages API (`/v1/messages`): point an agent's base URL here and every call is metered, and an over-budget one gets a hard 402. |
-| tokenfuse-cloud | 8080 | The money-plane control API (runs, budgets, savings, incidents). Started with a dev credential (see below). |
+| tokenfuse-cloud | 8080 | The money-plane control API (runs, budgets, savings, incidents). Started with one key minted for this run (see below). |
 | dashboard | 3000 | The money-plane dashboard, a static page served locally. This is the thing you actually look at. |
 | wardryx | 8090 | Policy decision point, seeded with a tiny demo policy scoped to fire-drill identities only. |
 | idryx | 8081 | Identity/access graph, built from the event stream. Its own default `:8080` collides with cloud, so stack-up runs it on `:8081`. |
@@ -587,16 +588,18 @@ prevented spend show too.
 
 It is the exact same mechanism as the short seed above, just more of it:
 clearly-labeled synthetic data (`agent://demo.local/*`) posted to cloud's
-ungated `/v1/ingest`. Cloud keeps it in memory, so it is fresh on every run
+`/v1/ingest` with this run's key. Cloud keeps it in memory, so it is fresh on every run
 and gone the moment you stop the stack - never written to disk, never
 presented as real, and off by default. `--no-demo` skips it exactly like it
 skips the short seed.
 
-To push your own data, POST call records to cloud:
+To push your own data, POST call records to cloud with the key the summary
+printed as `cloud key:`:
 
 ```sh
+CLOUD_KEY=<the cloud key ./up.sh printed>
 curl -X POST http://127.0.0.1:8080/v1/ingest \
-  -H 'authorization: Bearer devkey' \
+  -H "authorization: Bearer $CLOUD_KEY" \
   -H 'content-type: application/json' \
   -d '{"records":[{"run_id":"my-run","model":"gpt-4o-mini","cost_microusd":4200,"input_tokens":900,"output_tokens":300,"agent_id":"agent://acme.local/support/bot"}]}'
 ```
@@ -853,9 +856,18 @@ line up numerically - that is expected, not a bug.
 ## This is a sandbox, not a deployment
 
 - Every service binds to loopback only. Nothing is exposed off your machine.
-- `cloud` runs with `TOKENFUSE_CLOUD_ALLOW_DEVKEY=1` and an empty key set, which
-  activates the literal bearer `devkey`. That is a **dev credential for a local
-  sandbox** and nothing else. Do not run this on a host anything else can reach.
+- `cloud` runs with one key minted fresh for each run
+  (`TOKENFUSE_CLOUD_KEYS=<key>:default:admin`). The gateway, the demo seed and
+  the dashboard link use the same key, and the summary prints it once as
+  `cloud key:`. To use a key of your own, export `STACK_UP_CLOUD_KEY` (16 to 128
+  characters from `A-Z a-z 0-9 . _ ~ -`; anything else is refused before
+  anything is built). It is an admin key on a **local sandbox** and nothing
+  else. Do not run this on a host anything else can reach.
+- The literal bearer `devkey` no longer opens the cloud. It used to, through
+  `TOKENFUSE_CLOUD_ALLOW_DEVKEY=1` and an empty key set; tokenfuse removed that
+  fallback (tokenfuse#380), and a cloud started with that variable now refuses
+  to start. wardryx on this launcher still runs in its own dev-key mode
+  (`WARDRYX_ALLOW_DEVKEY=1`, loopback only), which is a separate setting.
 - `idryx serve` has no authentication of its own by design (loopback only).
 - The gateway clamps one run's caller-declared budget to the run-budget ceiling
   (5.00 USD by default, `--run-budget-ceiling`; see "The gateway's run-budget

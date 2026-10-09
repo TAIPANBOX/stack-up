@@ -657,6 +657,61 @@ run_case "die-keeps-its-exit-status: a dead plane exits 0 again" fail \
 	"$(py 'edit("up.sh", "      cleanup 1\n", "      cleanup\n")')" \
 	"does not call 'cleanup 1'"
 
+# invariant 17: the cloud holds one key minted for the run, and every caller of
+# the cloud uses it. tokenfuse#380 removed the devkey fallback: a cloud started
+# with TOKENFUSE_CLOUD_ALLOW_DEVKEY refuses to start, and an empty key set
+# authenticates nobody. The quiet one is the gateway: handed a key the cloud does
+# not hold, it starts, meters, and gets a 401 on every push to the cloud.
+run_case "cloud-key-is-per-run: the cloud is started with the removed devkey switch" fail \
+	'./scripts/cloud-key-is-per-run.sh' \
+	"$(py 'edit("up.sh", "PORT=\"$CLOUD_PORT\" \\\n", "PORT=\"$CLOUD_PORT\" \\\nTOKENFUSE_CLOUD_ALLOW_DEVKEY=\"1\" \\\n")')" \
+	"sets TOKENFUSE_CLOUD_ALLOW_DEVKEY"
+
+run_case "cloud-key-is-per-run: the cloud is started with an empty key set" fail \
+	'./scripts/cloud-key-is-per-run.sh' \
+	"$(py 'edit("up.sh", "TOKENFUSE_CLOUD_KEYS=\"$CLOUD_KEY:default:admin\"", "TOKENFUSE_CLOUD_KEYS=\"\"")')" \
+	"does not set TOKENFUSE_CLOUD_KEYS from the run"
+
+run_case "cloud-key-is-per-run: the cloud is started with a literal key" fail \
+	'./scripts/cloud-key-is-per-run.sh' \
+	"$(py 'edit("up.sh", "TOKENFUSE_CLOUD_KEYS=\"$CLOUD_KEY:default:admin\"", "TOKENFUSE_CLOUD_KEYS=\"devkey:default:admin\"")')" \
+	"does not set TOKENFUSE_CLOUD_KEYS from the run"
+
+run_case "cloud-key-is-per-run: the key is a fixed value, not minted" fail \
+	'./scripts/cloud-key-is-per-run.sh' \
+	"$(py 'edit("up.sh", "CLOUD_KEY=\"${STACK_UP_CLOUD_KEY:-$(rand_hex 16)}\"", "CLOUD_KEY=\"${STACK_UP_CLOUD_KEY:-devkey}\"")')" \
+	"never minted with rand_hex"
+
+run_case "cloud-key-is-per-run: no refusal after the mint" fail \
+	'./scripts/cloud-key-is-per-run.sh' \
+	"$(py 'edit("up.sh", "[ -n \"$CLOUD_KEY\" ] \\\n  || die \"could not mint the cloud", ": \\\n  || die \"could not mint the cloud")')" \
+	"no refusal on an empty CLOUD_KEY"
+
+run_case "cloud-key-is-per-run: a gateway reports to the cloud with the old literal" fail \
+	'./scripts/cloud-key-is-per-run.sh' \
+	"$(py 'edit("up.sh", "TOKENFUSE_CLOUD_KEY=\"$CLOUD_KEY\" \\\n", "TOKENFUSE_CLOUD_KEY=\"devkey\" \\\n")')" \
+	"TOKENFUSE_CLOUD_KEY is not \$CLOUD_KEY"
+
+run_case "cloud-key-is-per-run: the gateway's cloud key is an argument to env" fail \
+	'./scripts/cloud-key-is-per-run.sh' \
+	"$(py 'edit("up.sh", "  TOKENFUSE_CLOUD_KEY=\"$CLOUD_KEY\" \\\n  TOKENFUSE_DECLASSIFY_KEY=\"$GATEWAY_DECLASSIFY_KEY\" \\\n  env ", "  TOKENFUSE_DECLASSIFY_KEY=\"$GATEWAY_DECLASSIFY_KEY\" \\\n  env \\\n  TOKENFUSE_CLOUD_KEY=\"$CLOUD_KEY\" \\\n  ")')" \
+	"TOKENFUSE_CLOUD_KEY is an argument to env"
+
+run_case "cloud-key-is-per-run: the demo seed posts with the old literal" fail \
+	'./scripts/cloud-key-is-per-run.sh' \
+	"$(py 'edit("up.sh", "-H \"Authorization: Bearer $CLOUD_KEY\"", "-H \"Authorization: Bearer devkey\"")')" \
+	"still presents devkey"
+
+run_case "cloud-key-is-per-run: the dashboard link carries another key" fail \
+	'./scripts/cloud-key-is-per-run.sh' \
+	"$(py 'edit("up.sh", "&key=$CLOUD_KEY\"", "&key=$OTHER_KEY\"")')" \
+	"not this run's key"
+
+run_case "cloud-key-is-per-run: the summary names bearer devkey again" fail \
+	'./scripts/cloud-key-is-per-run.sh' \
+	"$(py 'edit("up.sh", "(bearer: the cloud key below)", "(bearer: devkey)")')" \
+	"still presents devkey"
+
 echo
 echo "=== and what they must NOT catch ==="
 
@@ -676,7 +731,7 @@ run_case "revoke-key-not-printed: only the path is named, not the content" pass 
 # make the gate stop finding TOKENFUSE_CACHE="off" in it.
 run_case "gateway-cache-is-off: an unrelated var added to the block" pass \
 	'./scripts/gateway-cache-is-off.sh' \
-	"$(py 'edit("up.sh", "TOKENFUSE_CLOUD_KEY=\"devkey\" \\\n", "TOKENFUSE_CLOUD_KEY=\"devkey\" \\\nTOKENFUSE_SPARE=\"1\" \\\n")')"
+	"$(py 'edit("up.sh", "TOKENFUSE_CLOUD_URL=\"http://127.0.0.1:$CLOUD_PORT\" \\\n", "TOKENFUSE_CLOUD_URL=\"http://127.0.0.1:$CLOUD_PORT\" \\\nTOKENFUSE_SPARE=\"1\" \\\n")')"
 
 # THE FIX FOR THE SAME BINARY'S OTHER SUBCOMMAND. `$GATEWAY_BIN mcp-broker`
 # fronts typryx under --with-typed and sets neither TOKENFUSE_UPSTREAM,
@@ -702,7 +757,7 @@ run_case "declassify-is-keyed: a second mcp-broker start is not mistaken for a g
 # An unrelated variable added to the same continued block must not hide the key.
 run_case "declassify-is-keyed: an unrelated var added to the block" pass \
 	'./scripts/declassify-is-keyed.sh' \
-	"$(py 'edit("up.sh", "TOKENFUSE_CLOUD_KEY=\"devkey\" \\\n", "TOKENFUSE_CLOUD_KEY=\"devkey\" \\\nTOKENFUSE_SPARE=\"1\" \\\n")')"
+	"$(py 'edit("up.sh", "TOKENFUSE_CLOUD_URL=\"http://127.0.0.1:$CLOUD_PORT\" \\\n", "TOKENFUSE_CLOUD_URL=\"http://127.0.0.1:$CLOUD_PORT\" \\\nTOKENFUSE_SPARE=\"1\" \\\n")')"
 
 # A reworded comment beside the mint is not a change to the key.
 run_case "declassify-is-keyed: the comment above the mint is reworded" pass \
@@ -715,7 +770,7 @@ run_case "declassify-is-keyed: the comment above the mint is reworded" pass \
 # trailing comment that happens to say the same word, would be excused by it.
 run_case "gateway-decides-its-upstream: a stray mention of mcp-broker does not excuse a real gateway start" fail \
 	'./scripts/gateway-decides-its-upstream.sh' \
-	"$(py 'edit("up.sh", "TOKENFUSE_ALLOW_STUB=\"1\" \\\n  TOKENFUSE_MODE=\"enforce\" \\\n  TOKENFUSE_CACHE=\"off\" \\\n  TOKENFUSE_EVENTS_PATH=\"$EVENTS_FILE\" \\\n  TOKENFUSE_DATA_DIR=\"$STACK_UP_HOME/traces/gateway\" \\\n  TOKENFUSE_CLOUD_URL=\"http://127.0.0.1:$CLOUD_PORT\" \\\n  TOKENFUSE_CLOUD_KEY=\"devkey\" \\\n    \"$GATEWAY_BIN\" > \"$LOGS_DIR/gateway.log\" 2>&1 &\nfi", "TOKENFUSE_MODE=\"enforce\" \\\n  TOKENFUSE_CACHE=\"off\" \\\n  TOKENFUSE_EVENTS_PATH=\"$EVENTS_FILE\" \\\n  TOKENFUSE_DATA_DIR=\"$STACK_UP_HOME/traces/gateway\" \\\n  TOKENFUSE_CLOUD_URL=\"http://127.0.0.1:$CLOUD_PORT\" \\\n  TOKENFUSE_CLOUD_KEY=\"devkey\" \\\n    \"$GATEWAY_BIN\" > \"$LOGS_DIR/gateway.log\" 2>&1 &  # not mcp-broker\nfi")')" \
+	"$(py 'edit("up.sh", "TOKENFUSE_ALLOW_STUB=\"1\" \\\n  TOKENFUSE_MODE=\"enforce\" \\\n  TOKENFUSE_CACHE=\"off\" \\\n  TOKENFUSE_EVENTS_PATH=\"$EVENTS_FILE\" \\\n  TOKENFUSE_DATA_DIR=\"$STACK_UP_HOME/traces/gateway\" \\\n  TOKENFUSE_CLOUD_URL=\"http://127.0.0.1:$CLOUD_PORT\" \\\n    \"$GATEWAY_BIN\" > \"$LOGS_DIR/gateway.log\" 2>&1 &\nfi", "TOKENFUSE_MODE=\"enforce\" \\\n  TOKENFUSE_CACHE=\"off\" \\\n  TOKENFUSE_EVENTS_PATH=\"$EVENTS_FILE\" \\\n  TOKENFUSE_DATA_DIR=\"$STACK_UP_HOME/traces/gateway\" \\\n  TOKENFUSE_CLOUD_URL=\"http://127.0.0.1:$CLOUD_PORT\" \\\n    \"$GATEWAY_BIN\" > \"$LOGS_DIR/gateway.log\" 2>&1 &  # not mcp-broker\nfi")')" \
 	"neither TOKENFUSE_UPSTREAM nor TOKENFUSE_ALLOW_STUB"
 
 # up.sh reads the domain from the environment and routines.sh from a file.
@@ -739,7 +794,7 @@ run_case "typed-mode: the training log's launch line is reworded" pass \
 
 run_case "run-budget-ceiling-is-set: an unrelated var added to the block" pass \
 	'./scripts/run-budget-ceiling-is-set.sh' \
-	"$(py 'edit("up.sh", "TOKENFUSE_CLOUD_KEY=\"devkey\" \\\n", "TOKENFUSE_CLOUD_KEY=\"devkey\" \\\nTOKENFUSE_SPARE=\"1\" \\\n")')"
+	"$(py 'edit("up.sh", "TOKENFUSE_CLOUD_URL=\"http://127.0.0.1:$CLOUD_PORT\" \\\n", "TOKENFUSE_CLOUD_URL=\"http://127.0.0.1:$CLOUD_PORT\" \\\nTOKENFUSE_SPARE=\"1\" \\\n")')"
 
 # The broker is the same binary on a subcommand and holds no run budget, so a
 # second such start, with a variable of its own, must not be judged a gateway.
@@ -774,6 +829,22 @@ run_case "typed-mode: the deadline comment is reworded" pass \
 run_case "die-keeps-its-exit-status: the comment above cleanup is reworded" pass \
 	'./scripts/die-keeps-its-exit-status.sh' \
 	"$(py 'edit("up.sh", "THE STATUS IS NOT ALWAYS 0, and it used to be.", "THE STATUS IS NOT ALWAYS ZERO, and it used to be.")')"
+
+# The cloud start block can grow a variable, and the key can be spelled with
+# braces, without the gate losing sight of it.
+run_case "cloud-key-is-per-run: an unrelated var added to the cloud start" pass \
+	'./scripts/cloud-key-is-per-run.sh' \
+	"$(py 'edit("up.sh", "PORT=\"$CLOUD_PORT\" \\\n", "PORT=\"$CLOUD_PORT\" \\\nTOKENFUSE_CLOUD_SPARE=\"1\" \\\n")')"
+
+run_case "cloud-key-is-per-run: the key spelled with braces" pass \
+	'./scripts/cloud-key-is-per-run.sh' \
+	"$(py 'edit("up.sh", "TOKENFUSE_CLOUD_KEYS=\"$CLOUD_KEY:default:admin\"", "TOKENFUSE_CLOUD_KEYS=\"${CLOUD_KEY}:default:admin\"")')"
+
+# Wardryx's own dev-key mode is a separate decision and not the cloud's key: a
+# hint about wardryx that presents its devkey must not be flagged.
+run_case "cloud-key-is-per-run: a wardryx hint with its own devkey is not the cloud's" pass \
+	'./scripts/cloud-key-is-per-run.sh' \
+	"$(py 'edit("up.sh", "log \"events:  $EVENTS_DIR\"\n", "log \"events:  $EVENTS_DIR\"\nlog \"policy:  curl -H \\\"Authorization: Bearer devkey\\\" http://127.0.0.1:$WARDRYX_PORT/v1/policies\"\n")')"
 
 echo
 echo "=== and the one this estate learned the hard way ==="
@@ -970,6 +1041,19 @@ run_case "die-keeps-its-exit-status: no cleanup function left to run" fail \
 	'./scripts/die-keeps-its-exit-status.sh' \
 	"$(py 'edit("up.sh", "cleanup() \u007b", "stop_everything() \u007b")')" \
 	"has no cleanup function"
+
+
+run_case "cloud-key-is-per-run: no up.sh left to read" fail \
+	'./scripts/cloud-key-is-per-run.sh' \
+	"$(py 'import subprocess, os
+assert os.path.exists("up.sh"), "expected up.sh"
+subprocess.run(["git", "mv", "up.sh", "up.bash"], check=True)')" \
+	"measured nothing"
+
+run_case "cloud-key-is-per-run: no cloud start left to judge" fail \
+	'./scripts/cloud-key-is-per-run.sh' \
+	"$(py 'edit("up.sh", "  \"$CLOUD_BIN\" > \"$LOGS_DIR/cloud.log\"", "  \"$CLOUD_BINARY\" > \"$LOGS_DIR/cloud.log\"")')" \
+	"measured nothing"
 
 echo
 if [ -n "$(git status --porcelain)" ]; then

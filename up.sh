@@ -11,7 +11,7 @@
 # What it starts by default (everything binds 127.0.0.1 only):
 #
 #   tokenfuse-gateway   :4100   budget-enforcement proxy (Anthropic Messages API)
-#   tokenfuse-cloud     :8080   money-plane control API (dev credential)
+#   tokenfuse-cloud     :8080   money-plane control API (a key minted per run)
 #   dashboard           :3000   the money-plane dashboard (static, in a browser)
 #   wardryx             :8090   policy decision point (seeded demo policy)
 #   idryx               :8081   identity/access graph (its own :8080 collides)
@@ -155,6 +155,14 @@
 #   --workspace <dir>   look here for sibling checkouts before cloning
 #                       (default: the directory this repo sits in)
 #   -h, --help          show this and exit
+#
+# Environment:
+#   STACK_UP_CLOUD_KEY  your own key for tokenfuse-cloud instead of the one
+#                       minted fresh each run: 16 to 128 characters from
+#                       A-Z a-z 0-9 . _ ~ -  (anything else exits 2 before
+#                       anything is built). It is the cloud's admin key here,
+#                       and the gateway, the demo seed and the dashboard link
+#                       all use it.
 #
 # This is a local sandbox and a dev quickstart, not a production deployment.
 # See README.md for the security notes and how to send it real traffic.
@@ -606,6 +614,25 @@ print_launch_plan() {
   printf 'launch: gateway run-budget ceiling: %s USD per run (TOKENFUSE_MAX_RUN_BUDGET_USD; a budget that comes from the caller, a policy default or the built-in default is clamped to it, a Cloud budget is not)\n' "$RUN_BUDGET_CEILING_USD"
 }
 
+# resolve_cloud_key - an operator's own STACK_UP_CLOUD_KEY, refused here, before
+# anything is built, unless it is 16 to 128 characters from A-Z a-z 0-9 . _ ~ -.
+# The key is written into TOKENFUSE_CLOUD_KEYS as "<key>:default:admin", where a
+# ':' or ',' would split it into a different spec (tokenfuse's parse_keys skips a
+# malformed entry, and a cloud with no valid entry authenticates nobody), and
+# into the dashboard link's query string, where '&', '#' or a space would cut it.
+# Sixteen is a floor against setting it back to a short word such as the old
+# public `devkey`. The value is never printed here, only what is wrong with it.
+# Unset, up.sh mints one per run (CLOUD_KEY, above the first gateway start).
+resolve_cloud_key() {
+  [ -n "${STACK_UP_CLOUD_KEY:-}" ] || return 0
+  if [[ "$STACK_UP_CLOUD_KEY" =~ ^[A-Za-z0-9._~-]{16,128}$ ]]; then
+    return 0
+  fi
+  echo "stack-up: STACK_UP_CLOUD_KEY must be 16 to 128 characters from A-Z a-z 0-9 . _ ~ - (it goes into TOKENFUSE_CLOUD_KEYS and the dashboard link); unset it to have one minted for this run" >&2
+  exit 2
+}
+
+resolve_cloud_key
 resolve_run_budget_ceiling
 resolve_typed_mode
 if [ "$TYPED_PLAN" -eq 1 ]; then
@@ -838,8 +865,9 @@ wait_health() {
   return 1
 }
 
-# seed_demo: POST a short, clearly-labeled demo dataset to cloud's ungated
-# /v1/ingest so the dashboard has something live to show on first open. Cloud
+# seed_demo: POST a short, clearly-labeled demo dataset to cloud's /v1/ingest
+# (admin or ingest role; this run's CLOUD_KEY is admin) so the dashboard has
+# something live to show on first open. Cloud
 # runs in-memory here (no TOKENFUSE_CLOUD_DATA), so this is fresh every run and
 # nothing is written to disk. Two synthetic runs under agent://demo.local/*.
 seed_demo() {
@@ -860,7 +888,7 @@ seed_demo() {
   done
   recs="${recs%,}"
   if curl -fsS -o /dev/null -X POST "http://127.0.0.1:$CLOUD_PORT/v1/ingest" \
-       -H "Authorization: Bearer devkey" -H "Content-Type: application/json" \
+       -H "Authorization: Bearer $CLOUD_KEY" -H "Content-Type: application/json" \
        -d "{\"records\":[$recs]}" 2>/dev/null; then
     log "seeded a short demo dataset into cloud (two runs) so the dashboard is not empty; pass --no-demo to skip"
   else
@@ -942,7 +970,7 @@ demo_traffic() {
 # seed_demo_fleet: like seed_demo above, but a richer, still clearly-labeled
 # dataset for a prospect who wants to see a live, moving console without
 # wiring up their own agents. Same mechanism as seed_demo (POST to cloud's
-# ungated /v1/ingest, Bearer devkey, loopback CLOUD_PORT), just more of it: a
+# /v1/ingest, Bearer $CLOUD_KEY, loopback CLOUD_PORT), just more of it: a
 # believable single-org fleet of 16 agents across finance/sre/support/data,
 # each with 3 runs, cache hits and model-router downgrades so "Governed
 # savings" has real cache/router numbers, and two budget breaches (one small,
@@ -1150,7 +1178,7 @@ PY
     fi
     batches=$((batches + 1))
     if curl -fsS -o /dev/null -X POST "http://127.0.0.1:$CLOUD_PORT/v1/ingest" \
-         -H "Authorization: Bearer devkey" -H "Content-Type: application/json" \
+         -H "Authorization: Bearer $CLOUD_KEY" -H "Content-Type: application/json" \
          -d "$line" 2>/dev/null; then
       sent=$((sent + 1))
     fi
@@ -1375,7 +1403,9 @@ fi
 # dataset "so the dashboard is not empty" - the dashboard COULD not fill up,
 # because the pipe between the two processes it had just started was never
 # connected. Real traffic (18 metered calls) left /v1/runs empty; with these
-# two lines the same traffic shows up as real runs with real spend.
+# two lines the same traffic shows up as real runs with real spend. The KEY is
+# this run's CLOUD_KEY, the one the cloud below is started with: a key the cloud
+# does not hold is a 401 on every push, which only the gateway's own log shows.
 # TOKENFUSE_ALLOW_STUB is neither optional nor cosmetic: with neither it nor a
 # TOKENFUSE_UPSTREAM, the gateway REFUSES TO START and this launcher dies at
 # "gateway did not come up". tokenfuse made the stub opt-in on 2026-07-25
@@ -1557,6 +1587,28 @@ GATEWAY_DECLASSIFY_KEY="$(rand_hex 24)"
 [ -n "$GATEWAY_DECLASSIFY_KEY" ] \
   || die "could not mint the gateway's declassify key (no openssl, and /dev/urandom gave nothing); refusing to start a gateway whose declassify endpoint would be open."
 
+# The cloud's key for this run: ONE key, used everywhere this launcher talks to
+# the cloud. The cloud is started with it as TOKENFUSE_CLOUD_KEYS
+# "<key>:default:admin" (the same org, role and no-site the old fallback had),
+# the gateway reports to the cloud with it (TOKENFUSE_CLOUD_KEY), the demo seed
+# posts with it, and the dashboard link and the summary carry it.
+#
+# It used to be the literal bearer `devkey`, which the cloud accepted as admin
+# when started with an empty key set and TOKENFUSE_CLOUD_ALLOW_DEVKEY=1. That
+# fallback is gone from tokenfuse (tokenfuse#380): a cloud started with the
+# variable set refuses to start (exit 2), and an empty key set authenticates
+# nobody. A key written into a public repository is no key, so it is minted per
+# run here, like the declassify key above, unless the operator set
+# STACK_UP_CLOUD_KEY (checked at argument parsing, resolve_cloud_key).
+#
+# Minted HERE, above the first gateway start, because the gateway starts before
+# the cloud and is handed the key at its start. The refusal on empty follows:
+# an empty key would start a cloud that answers every request 401 while the
+# launcher reports a healthy stand. scripts/cloud-key-is-per-run.sh holds this.
+CLOUD_KEY="${STACK_UP_CLOUD_KEY:-$(rand_hex 16)}"
+[ -n "$CLOUD_KEY" ] \
+  || die "could not mint the cloud's key (no openssl, and /dev/urandom gave nothing); refusing to start a cloud that would authenticate nobody."
+
 # TOKENFUSE_MAX_RUN_BUDGET_USD (tokenfuse v1.5.0, invariant 73): the operator's
 # ceiling on the budget one run may be granted. A run's budget comes from the
 # header the AGENT sends (x-fuse-budget-usd), from a policy default or from the
@@ -1580,10 +1632,11 @@ if [ -n "$WARDRYX_URL" ]; then
   # defaults to shadow mode, which takes one global mutex per call and walks
   # up to 10,000 cached entries computing cosine similarity, serving nothing.
   # tokenfuse#319.
-  # TOKENFUSE_DECLASSIFY_KEY is a prefix assignment BEFORE `env`, not an
-  # argument to it: env would put the value on its own command line for the
-  # moment before it execs the gateway, where `ps` can read it. A prefix
-  # assignment lands in the environment of the process only.
+  # TOKENFUSE_DECLASSIFY_KEY and TOKENFUSE_CLOUD_KEY are prefix assignments
+  # BEFORE `env`, not arguments to it: env would put the value on its own
+  # command line for the moment before it execs the gateway, where `ps` can
+  # read it. A prefix assignment lands in the environment of the process only.
+  TOKENFUSE_CLOUD_KEY="$CLOUD_KEY" \
   TOKENFUSE_DECLASSIFY_KEY="$GATEWAY_DECLASSIFY_KEY" \
   env ${DELEG_ENV[@]+"${DELEG_ENV[@]}"} \
   TOKENFUSE_ADDR="127.0.0.1:$GATEWAY_PORT" \
@@ -1594,7 +1647,6 @@ if [ -n "$WARDRYX_URL" ]; then
   TOKENFUSE_EVENTS_PATH="$EVENTS_FILE" \
   TOKENFUSE_DATA_DIR="$STACK_UP_HOME/traces/gateway" \
   TOKENFUSE_CLOUD_URL="http://127.0.0.1:$CLOUD_PORT" \
-  TOKENFUSE_CLOUD_KEY="devkey" \
   TOKENFUSE_WARDRYX_MODE="enforce" \
   TOKENFUSE_WARDRYX_URL="$WARDRYX_URL" \
   TOKENFUSE_WARDRYX_KEY="devkey" \
@@ -1610,10 +1662,11 @@ else
   # defaults to shadow mode, which takes one global mutex per call and walks
   # up to 10,000 cached entries computing cosine similarity, serving nothing.
   # tokenfuse#319.
-  # TOKENFUSE_DECLASSIFY_KEY is a prefix assignment BEFORE `env`, not an
-  # argument to it: env would put the value on its own command line for the
-  # moment before it execs the gateway, where `ps` can read it. A prefix
-  # assignment lands in the environment of the process only.
+  # TOKENFUSE_DECLASSIFY_KEY and TOKENFUSE_CLOUD_KEY are prefix assignments
+  # BEFORE `env`, not arguments to it: env would put the value on its own
+  # command line for the moment before it execs the gateway, where `ps` can
+  # read it. A prefix assignment lands in the environment of the process only.
+  TOKENFUSE_CLOUD_KEY="$CLOUD_KEY" \
   TOKENFUSE_DECLASSIFY_KEY="$GATEWAY_DECLASSIFY_KEY" \
   env ${DELEG_ENV[@]+"${DELEG_ENV[@]}"} \
   TOKENFUSE_ADDR="127.0.0.1:$GATEWAY_PORT" \
@@ -1624,18 +1677,20 @@ else
   TOKENFUSE_EVENTS_PATH="$EVENTS_FILE" \
   TOKENFUSE_DATA_DIR="$STACK_UP_HOME/traces/gateway" \
   TOKENFUSE_CLOUD_URL="http://127.0.0.1:$CLOUD_PORT" \
-  TOKENFUSE_CLOUD_KEY="devkey" \
     "$GATEWAY_BIN" > "$LOGS_DIR/gateway.log" 2>&1 &
 fi
 register gateway "$!" INT
 wait_health gateway "$GATEWAY_PORT" "$!" || die "gateway did not come up."
 
-# cloud: devkey mode. Empty TOKENFUSE_CLOUD_KEYS + ALLOW_DEVKEY=1 makes the
-# literal bearer "devkey" valid, so the dashboard connects with one click.
-log "starting cloud on :$CLOUD_PORT (dev credential)"
+# cloud: one key, this run's CLOUD_KEY, as org `default`, role `admin`, no site.
+# The dashboard link below carries the same key, so it still connects with one
+# click. TOKENFUSE_CLOUD_ALLOW_DEVKEY is NOT set: tokenfuse#380 removed the
+# fallback it enabled, and a cloud that sees it now refuses to start (exit 2).
+# A prefix assignment, so the key is in the cloud's environment and on no
+# command line.
+log "starting cloud on :$CLOUD_PORT (a key minted for this run)"
 PORT="$CLOUD_PORT" \
-TOKENFUSE_CLOUD_KEYS="" \
-TOKENFUSE_CLOUD_ALLOW_DEVKEY="1" \
+TOKENFUSE_CLOUD_KEYS="$CLOUD_KEY:default:admin" \
   "$CLOUD_BIN" > "$LOGS_DIR/cloud.log" 2>&1 &
 register cloud "$!" TERM
 wait_health cloud "$CLOUD_PORT" "$!" || die "cloud did not come up."
@@ -1679,7 +1734,7 @@ if [ "$WANT_DASHBOARD" -eq 1 ] && [ -f "$DASH_OUT/index.html" ]; then
   python3 -m http.server "$DASH_PORT" --bind 127.0.0.1 --directory "$DASH_OUT" > "$LOGS_DIR/dashboard.log" 2>&1 &
   register dashboard "$!" TERM
   if wait_health dashboard "$DASH_PORT" "$!" / 20; then
-    DASH_URL="http://127.0.0.1:$DASH_PORT/?base=http://127.0.0.1:$CLOUD_PORT&key=devkey"
+    DASH_URL="http://127.0.0.1:$DASH_PORT/?base=http://127.0.0.1:$CLOUD_PORT&key=$CLOUD_KEY"
   fi
 fi
 
@@ -2503,7 +2558,7 @@ fi
 echo
 log "the stack is up:"
 printf '  %-12s http://127.0.0.1:%s   %s\n' "gateway" "$GATEWAY_PORT" "Anthropic Messages API, enforcing budgets"
-printf '  %-12s http://127.0.0.1:%s   %s\n' "cloud"   "$CLOUD_PORT"   "money-plane API (bearer: devkey)"
+printf '  %-12s http://127.0.0.1:%s   %s\n' "cloud"   "$CLOUD_PORT"   "money-plane API (bearer: the cloud key below)"
 [ -n "$DASH_URL" ]                 && printf '  %-12s http://127.0.0.1:%s\n' "dashboard" "$DASH_PORT"
 [ "$WANT_POLICY" -eq 1 ]           && printf '  %-12s http://127.0.0.1:%s   %s\n' "wardryx" "$WARDRYX_PORT" "policy decision point"
 [ "$WANT_IDENTITY" -eq 1 ]         && printf '  %-12s http://127.0.0.1:%s   %s\n' "idryx"   "$IDRYX_PORT"   "identity graph (/api/identities)"
@@ -2538,9 +2593,14 @@ if [ -n "$DASH_URL" ]; then
   printf '\033[1;32m  %s\033[0m\n' "$DASH_URL"
 else
   log "no dashboard this run. Point a tool at the money-plane API:"
-  printf '  curl -H "Authorization: Bearer devkey" http://127.0.0.1:%s/v1/summary\n' "$CLOUD_PORT"
+  printf '  curl -H "Authorization: Bearer %s" http://127.0.0.1:%s/v1/summary\n' "$CLOUD_KEY" "$CLOUD_PORT"
 fi
 echo
+if [ -n "${STACK_UP_CLOUD_KEY:-}" ]; then
+  log "cloud key: $CLOUD_KEY   (yours, from STACK_UP_CLOUD_KEY; admin on the cloud, held in its environment and the gateway's)"
+else
+  log "cloud key: $CLOUD_KEY   (minted fresh this run, admin on the cloud; set STACK_UP_CLOUD_KEY to choose your own)"
+fi
 log "events:  $EVENTS_DIR"
 log "logs:    $LOGS_DIR"
 log "budget:  the gateway clamps any one run's budget to $RUN_BUDGET_CEILING_USD USD when it comes from the caller, a policy default or the built-in default (--run-budget-ceiling; a Cloud budget is not clamped)"

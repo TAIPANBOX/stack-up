@@ -145,6 +145,11 @@
 #                       clamped. A positive decimal, at most six decimals;
 #                       anything else exits 2 before anything is built. Needs a
 #                       gateway built from tokenfuse v1.5.0 or newer.
+#   --firewall <mode>   the agent firewall in every gateway start (tokenfuse's
+#                       TOKENFUSE_FIREWALL): enforce (the default), shadow (writes
+#                       what it would refuse and refuses nothing) or off. Any other
+#                       word exits 2 at argument parsing, before anything is built.
+#                       README.md, "The agent firewall", says what enforce refuses.
 #   --plan              resolve every choice above, print what would start and
 #                       what would leave this machine (paths, never key
 #                       contents), and exit before building or starting
@@ -302,6 +307,16 @@ TYPED_RISK_SIGNAL=0
 # warning for the default and a refusal for a figure somebody chose.
 RUN_BUDGET_CEILING_USD="5.00"
 RUN_BUDGET_CEILING_ASKED=0
+# The agent firewall's mode, handed to every gateway start as TOKENFUSE_FIREWALL
+# (tokenfuse's firewall: taint labels from what a run read, capabilities refused
+# under them, and the anti-exfiltration floor). enforce by default @claude 2026-10-13:
+# a run that has read untrusted input and then asks for exec, write or network
+# egress is refused, and a run holding a secret cannot egress. shadow records those
+# refusals and lets the calls through; off turns the firewall off. It comes from
+# --firewall only, never from the caller's environment, the same rule as the
+# run-budget ceiling. resolve_firewall_mode refuses any other word, because tokenfuse
+# keeps its shadow default silently for a value it does not name.
+FIREWALL_MODE="enforce"
 FORCE_INSTALL=0
 WORKSPACE="${STACK_UP_WORKSPACE:-$(dirname "$SCRIPT_DIR")}"
 
@@ -342,6 +357,8 @@ while [ $# -gt 0 ]; do
     --typed-risk-signal) TYPED_RISK_SIGNAL=1 ;;
     --run-budget-ceiling) shift; RUN_BUDGET_CEILING_USD="${1:-}"; RUN_BUDGET_CEILING_ASKED=1 ;;
     --run-budget-ceiling=*) RUN_BUDGET_CEILING_USD="${1#--run-budget-ceiling=}"; RUN_BUDGET_CEILING_ASKED=1 ;;
+    --firewall) shift; FIREWALL_MODE="${1:-}" ;;
+    --firewall=*) FIREWALL_MODE="${1#--firewall=}" ;;
     --typed-plan|--plan) TYPED_PLAN=1 ;;
     --force-install) FORCE_INSTALL=1 ;;
     --workspace) shift; WORKSPACE="${1:-}"; [ -n "$WORKSPACE" ] || { echo "stack-up: --workspace needs a directory" >&2; exit 2; } ;;
@@ -610,8 +627,24 @@ resolve_run_budget_ceiling() {
   exit 2
 }
 
+# resolve_firewall_mode - the agent firewall's switch, refused here, before anything
+# is built, unless it is one of the three words tokenfuse reads. tokenfuse's own
+# from_env() reads TOKENFUSE_FIREWALL for enforce, shadow and off and keeps its
+# default (shadow) for any other value with no warning (crates/gateway/src/
+# firewall.rs at tokenfuse main b3373bf), so a misspelling here would run the box in
+# shadow while the operator believes it enforces. Case-sensitive, as tokenfuse is:
+# "Enforce" would be the same silent fallback.
+resolve_firewall_mode() {
+  case "$FIREWALL_MODE" in
+    enforce|shadow|off) return 0 ;;
+  esac
+  echo "stack-up: --firewall takes enforce, shadow or off (got '$FIREWALL_MODE')" >&2
+  exit 2
+}
+
 print_launch_plan() {
   printf 'launch: gateway run-budget ceiling: %s USD per run (TOKENFUSE_MAX_RUN_BUDGET_USD; a budget that comes from the caller, a policy default or the built-in default is clamped to it, a Cloud budget is not)\n' "$RUN_BUDGET_CEILING_USD"
+  printf 'launch: agent firewall: %s (TOKENFUSE_FIREWALL on every gateway start; enforce refuses exec, write and network egress on a run that read untrusted input, and network egress on a run holding a secret; shadow records those refusals and lets them through; off turns the firewall off)\n' "$FIREWALL_MODE"
 }
 
 # resolve_cloud_key - an operator's own STACK_UP_CLOUD_KEY, refused here, before
@@ -632,6 +665,7 @@ resolve_cloud_key() {
   exit 2
 }
 
+resolve_firewall_mode
 resolve_cloud_key
 resolve_run_budget_ceiling
 resolve_typed_mode
@@ -1621,7 +1655,12 @@ CLOUD_KEY="${STACK_UP_CLOUD_KEY:-$(rand_hex 16)}"
 # word and tokenfuse never clamps it. NOT the mcp-broker below: it holds no run
 # budget. One figure per run, not per agent: an agent that opens a new run id gets
 # a new ceiling's worth. scripts/run-budget-ceiling-is-set.sh holds the starts.
-log "starting gateway on :$GATEWAY_PORT (enforce, stub upstream, run budget ceiling $RUN_BUDGET_CEILING_USD USD, reporting to the cloud)"
+# The agent firewall rides the same starts as TOKENFUSE_FIREWALL, from FIREWALL_MODE
+# (enforce by default; --firewall changes it, and resolve_firewall_mode refuses any
+# other word). It is a plain setting, not a secret, so it sits with the other
+# settings of each start. It is not on the mcp-broker below, which reads no firewall.
+# scripts/firewall-is-enforce.sh holds the starts.
+log "starting gateway on :$GATEWAY_PORT (enforce, stub upstream, run budget ceiling $RUN_BUDGET_CEILING_USD USD, agent firewall $FIREWALL_MODE, reporting to the cloud)"
 if [ -n "$WARDRYX_URL" ]; then
   # ${a[@]+"${a[@]}"} and not "${a[@]}": under `set -u` bash 3.2, which is what
   # /usr/bin/env bash resolves to on macOS, an empty array expansion is an
@@ -1641,6 +1680,7 @@ if [ -n "$WARDRYX_URL" ]; then
   env ${DELEG_ENV[@]+"${DELEG_ENV[@]}"} \
   TOKENFUSE_ADDR="127.0.0.1:$GATEWAY_PORT" \
   TOKENFUSE_MAX_RUN_BUDGET_USD="$RUN_BUDGET_CEILING_USD" \
+  TOKENFUSE_FIREWALL="$FIREWALL_MODE" \
   TOKENFUSE_ALLOW_STUB="1" \
   TOKENFUSE_MODE="enforce" \
   TOKENFUSE_CACHE="off" \
@@ -1671,6 +1711,7 @@ else
   env ${DELEG_ENV[@]+"${DELEG_ENV[@]}"} \
   TOKENFUSE_ADDR="127.0.0.1:$GATEWAY_PORT" \
   TOKENFUSE_MAX_RUN_BUDGET_USD="$RUN_BUDGET_CEILING_USD" \
+  TOKENFUSE_FIREWALL="$FIREWALL_MODE" \
   TOKENFUSE_ALLOW_STUB="1" \
   TOKENFUSE_MODE="enforce" \
   TOKENFUSE_CACHE="off" \
@@ -2604,6 +2645,7 @@ fi
 log "events:  $EVENTS_DIR"
 log "logs:    $LOGS_DIR"
 log "budget:  the gateway clamps any one run's budget to $RUN_BUDGET_CEILING_USD USD when it comes from the caller, a policy default or the built-in default (--run-budget-ceiling; a Cloud budget is not clamped)"
+log "firewall: the gateway runs its agent firewall in $FIREWALL_MODE (--firewall enforce, shadow or off; see README.md, The agent firewall)"
 log "declassify: POST http://127.0.0.1:$GATEWAY_PORT/v1/fuse/declassify clears a run's taint label and needs the header"
 log "         x-fuse-declassify-key: $GATEWAY_DECLASSIFY_KEY   (minted fresh this run, held in the gateway's environment only)"
 if [ "$WITH_DELEGATION" -eq 1 ]; then

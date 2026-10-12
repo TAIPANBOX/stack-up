@@ -42,6 +42,9 @@ jobs:
       - name: the cloud holds one per-run key, every caller uses it, and nothing sets the removed devkey switch
         run: ./scripts/cloud-key-is-per-run.sh
 
+      - name: every gateway start runs the agent firewall from the switch, default enforce
+        run: ./scripts/firewall-is-enforce.sh
+
       - name: the revocation key is never logged
         run: ./scripts/revoke-key-not-printed.sh
 

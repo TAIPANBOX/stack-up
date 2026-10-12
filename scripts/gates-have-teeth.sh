@@ -712,6 +712,75 @@ run_case "cloud-key-is-per-run: the summary names bearer devkey again" fail \
 	"$(py 'edit("up.sh", "(bearer: the cloud key below)", "(bearer: devkey)")')" \
 	"still presents devkey"
 
+# invariant 18: every gateway start runs tokenfuse's agent firewall from the switch,
+# and the switch defaults to enforce. tokenfuse's firewall is in shadow when the
+# setting is absent, so a start that loses it runs in shadow and says nothing.
+# edit() replaces only the first occurrence, so the other start keeps it.
+run_case "firewall-is-enforce: one gateway start drops TOKENFUSE_FIREWALL" fail \
+	'./scripts/firewall-is-enforce.sh' \
+	"$(py 'edit("up.sh", "  TOKENFUSE_FIREWALL=\"$FIREWALL_MODE\" \\\n", "")')" \
+	"does not set TOKENFUSE_FIREWALL"
+
+# A start that writes shadow in place of the switch cannot be reached by --firewall.
+run_case "firewall-is-enforce: one gateway start sets shadow in place of the switch" fail \
+	'./scripts/firewall-is-enforce.sh' \
+	"$(py 'edit("up.sh", "TOKENFUSE_FIREWALL=\"$FIREWALL_MODE\"", "TOKENFUSE_FIREWALL=\"shadow\"")')" \
+	"is not set from"
+
+run_case "firewall-is-enforce: the default becomes shadow" fail \
+	'./scripts/firewall-is-enforce.sh' \
+	"$(py 'edit("up.sh", "FIREWALL_MODE=\"enforce\"", "FIREWALL_MODE=\"shadow\"")')" \
+	"the firewall default is not"
+
+# A default read from the caller's environment is an operator's export changing
+# what a stand does, which is the thing the switch is not allowed to be.
+run_case "firewall-is-enforce: the default is read from the caller's environment" fail \
+	'./scripts/firewall-is-enforce.sh' \
+	"$(py 'edit("up.sh", "FIREWALL_MODE=\"enforce\"", "FIREWALL_MODE=\"${TOKENFUSE_FIREWALL:-enforce}\"")')" \
+	"the firewall default is not"
+
+# The broker is the same binary on a subcommand and reads no firewall.
+run_case "firewall-is-enforce: the MCP broker start is given the switch" fail \
+	'./scripts/firewall-is-enforce.sh' \
+	"$(py 'edit("up.sh", "  TOKENFUSE_MCP_ADDR=\"127.0.0.1:$BROKER_PORT\" \\\n", "  TOKENFUSE_FIREWALL=\"$FIREWALL_MODE\" \\\n  TOKENFUSE_MCP_ADDR=\"127.0.0.1:$BROKER_PORT\" \\\n")')" \
+	"the MCP broker start sets TOKENFUSE_FIREWALL"
+
+# tokenfuse keeps shadow silently for a word it does not name, so a word the launcher
+# accepts is a word that runs the box in shadow with nothing said.
+run_case "firewall-is-enforce: a mode tokenfuse would not read is accepted" fail \
+	'./scripts/firewall-is-enforce.sh' \
+	"$(py 'edit("up.sh", "enforce|shadow|off) return 0", "enforce|shadow|off|enfroce) return 0")')" \
+	"wanted 2 naming the flag"
+
+run_case "firewall-is-enforce: the validation is removed" fail \
+	'./scripts/firewall-is-enforce.sh' \
+	"$(py 'edit("up.sh", "resolve_firewall_mode\nresolve_cloud_key\n", "resolve_cloud_key\n")')" \
+	"wanted 2 naming the flag"
+
+run_case "firewall-is-enforce: the plan stops naming the mode" fail \
+	'./scripts/firewall-is-enforce.sh' \
+	"$(py 'edit("up.sh", "launch: agent firewall: %s", "launch: agent %s")')" \
+	"does not name the agent firewall"
+
+run_case "firewall-is-enforce: up.sh stops taking --plan" fail \
+	'./scripts/firewall-is-enforce.sh' \
+	"$(py 'edit("up.sh", "--typed-plan|--plan) TYPED_PLAN=1 ;;", "--typed-plan|--planned) TYPED_PLAN=1 ;;")')" \
+	"has no --plan"
+
+run_case "firewall-is-enforce: no gateway start left to judge" fail \
+	'./scripts/firewall-is-enforce.sh' \
+	"$(py 's = open("up.sh").read()
+t = s.replace("\"$GATEWAY_BIN\" > \"$LOGS_DIR/gateway.log\" 2>&1 &", "gateway_launcher > \"$LOGS_DIR/gateway.log\" 2>&1 &")
+assert t != s
+open("up.sh", "w").write(t)')" \
+	"nowhere, so this measured nothing"
+
+run_case "firewall-is-enforce: no up.sh left to read" fail \
+	'./scripts/firewall-is-enforce.sh' \
+	"$(py 'import subprocess
+subprocess.run(["git", "mv", "up.sh", "up.bash"], check=True)')" \
+	"measured nothing"
+
 echo
 echo "=== and what they must NOT catch ==="
 
@@ -845,6 +914,21 @@ run_case "cloud-key-is-per-run: the key spelled with braces" pass \
 run_case "cloud-key-is-per-run: a wardryx hint with its own devkey is not the cloud's" pass \
 	'./scripts/cloud-key-is-per-run.sh' \
 	"$(py 'edit("up.sh", "log \"events:  $EVENTS_DIR\"\n", "log \"events:  $EVENTS_DIR\"\nlog \"policy:  curl -H \\\"Authorization: Bearer devkey\\\" http://127.0.0.1:$WARDRYX_PORT/v1/policies\"\n")')"
+
+# A comment that names the other two words is prose, and the gate reads the commands.
+run_case "firewall-is-enforce: a comment naming shadow and off is not a setting" pass \
+	'./scripts/firewall-is-enforce.sh' \
+	"$(py 'edit("up.sh", "log \"starting gateway on :$GATEWAY_PORT", "# A comment that names shadow and off, the other two words, changes nothing here.\nlog \"starting gateway on :$GATEWAY_PORT")')"
+
+run_case "firewall-is-enforce: an unrelated var added to the gateway block" pass \
+	'./scripts/firewall-is-enforce.sh' \
+	"$(py 'edit("up.sh", "  TOKENFUSE_CACHE=\"off\" \\\n", "  TOKENFUSE_CACHE=\"off\" \\\n  TOKENFUSE_STACK_UP_NOTE=\"unrelated\" \\\n")')"
+
+# A second broker launch, with a variable of its own, is not a gateway start and
+# carries no switch, so the gate neither judges it as a gateway nor flags it.
+run_case "firewall-is-enforce: a second mcp-broker start is not mistaken for a gateway start" pass \
+	'./scripts/firewall-is-enforce.sh' \
+	"$(py 'edit("up.sh", "\n  register tokenfuse-mcp-broker \"$!\" TERM\n", "\n  register tokenfuse-mcp-broker \"$!\" TERM\n  TOKENFUSE_MCP_ADDR=\"127.0.0.1:9999\" \\\n    \"$GATEWAY_BIN\" mcp-broker > /dev/null 2>&1 &\n")')"
 
 echo
 echo "=== and the one this estate learned the hard way ==="

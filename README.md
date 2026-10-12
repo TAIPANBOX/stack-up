@@ -723,6 +723,34 @@ several domains on purpose: scopyx identifies its demo agent as
 sandbox identity must not be mistakable for a real one in a trail somebody
 keeps. Only a total refusal stops the run.
 
+### The agent firewall
+
+tokenfuse's agent firewall watches what a run reads and then what it asks to do.
+`up.sh` runs it in **enforce** on every gateway start. `--firewall enforce|shadow|off`
+changes that, and any other word exits with status 2 while the arguments are still
+being read, before anything is built.
+
+```sh
+./up.sh --plan                 # prints the firewall's mode, starting nothing
+./up.sh --firewall shadow      # record what enforce would refuse, and refuse nothing
+```
+
+With tokenfuse's starter policy, enforce refuses these calls:
+
+- **exec, write and network egress** (`run_shell`, `exec`, `bash`; `write_file`,
+  `db_write`, `deploy`; `send_email`, `http_post`, `send_message`) once the run has
+  read untrusted input: web pages, email, files, anything unclassified, or a tool
+  result that reads like an injected instruction;
+- **network egress** once the run holds a secret, read through `vault_read` or
+  `read_secret`;
+- a tool a request declares whose description reads like an injected instruction
+  counts as untrusted input from that call on.
+
+A tool the starter policy does not map to one of those capabilities is not refused
+by these rules. `--firewall shadow` writes the same refusals to the event stream and
+lets the calls through, so you can see what enforce would have done before you
+choose it. `--firewall off` turns the firewall off: no taint tracking and no refusals.
+
 ## Options
 
 ```
@@ -745,6 +773,7 @@ keeps. Only a total refusal stops the run.
 --typed-training   keep typryx's opt-in local training log (off by default; needs typryx v0.3.0+, see "Your own model, on your own data")
 --typed-risk-signal  also run typryx wardryx-proxy and point the MCP broker at it (off by default; see "The typed risk signal")
 --run-budget-ceiling <usd>  the most one run may be granted (default 5.00; see "The gateway's run-budget ceiling")
+--firewall <mode>  the agent firewall: enforce (default), shadow or off (see "The agent firewall")
 --plan             print every resolved choice and exit, starting nothing (--typed-plan is the same flag)
 -h, --help         show help
 ```

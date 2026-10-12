@@ -33,6 +33,7 @@ bash -n up.sh && bash -n down.sh && bash -n routines.sh
 ./scripts/gateway-cache-is-off.sh
 ./scripts/declassify-is-keyed.sh
 ./scripts/cloud-key-is-per-run.sh
+./scripts/firewall-is-enforce.sh
 ./scripts/revoke-key-not-printed.sh
 ./scripts/typed-mode.sh
 ./scripts/run-budget-ceiling-is-set.sh
@@ -446,6 +447,35 @@ building here and the thing that most often gets skipped.
     needs a built cloud; and that the key is private: it is printed in the
     summary and the dashboard link on purpose, and the seed's `curl` carries it
     on its command line for the moment it runs.)*
+
+18. **Every gateway start runs tokenfuse's agent firewall from one switch, and the
+    switch defaults to enforce.** `@decided 2026-10-13`: the launcher runs the agent
+    firewall in enforce by default, shipped as its own change after a test stack,
+    and one switch, `--firewall enforce|shadow|off`, runs it in shadow or off.
+    `up.sh` sets `TOKENFUSE_FIREWALL` on both gateway starts from `FIREWALL_MODE`,
+    which only `--firewall` fills: never the caller's environment, never a literal.
+    The MCP broker start does not carry it, since the broker is the same binary on a
+    subcommand and reads no firewall. Any other word exits 2 at argument parsing,
+    because tokenfuse's own loader keeps its shadow default silently for a value it
+    does not name. `@claude 2026-10-13`: the flag's name, its three words and the
+    refusal are my choices under that decision; the enforce default is the decision.
+    What enforce refuses, on tokenfuse's starter policy: exec, write and network
+    egress on a run that has read untrusted input (web, email, file or unclassified
+    sources, or a tool result that read like an instruction), and network egress on
+    a run holding a secret. A tool a request declares whose description reads as an
+    instruction carries the same injection label (tokenfuse's invariant 93).
+    *(gate: `scripts/firewall-is-enforce.sh`: every gateway start (a launch at the
+    command position, not `mcp-broker`) carries exactly one `TOKENFUSE_FIREWALL`
+    assignment, and it is `"$FIREWALL_MODE"`; `FIREWALL_MODE` is `enforce` by
+    default; the MCP broker start carries none; `--plan` names the mode; `--firewall`
+    accepts enforce, shadow and off and refuses every other word with exit 2, and
+    creates no state directory on a refusal. Refuses to report OK with no up.sh, no
+    GATEWAY_BIN, no gateway start or no `--plan`. 14 cases in
+    `gates-have-teeth.sh`, `features/the-agent-firewall-is-enforce-by-default.feature`
+    (14 scenarios). Not covered: that a running gateway refuses a dangerous
+    capability on a run that read untrusted input. That is tokenfuse's own test (its
+    invariants 25 to 27 and 93) and needs a built gateway; this gate proves only that
+    the launcher hands the gateway the switch's value.)*
 
 An approved architecture decision is **not finished** until it is two things: a
 numbered invariant in this file, and a gate in a script if it can be checked

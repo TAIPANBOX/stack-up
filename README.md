@@ -746,6 +746,10 @@ With tokenfuse's starter policy, enforce refuses these calls:
 - a tool a request declares whose description reads like an injected instruction
   counts as untrusted input from that call on.
 
+Unclassified means any tool the starter policy's source map does not name, so an
+agent that calls any tool of its own and later, in the same run, one of the nine names
+above is refused. An agent that chains those names on purpose runs under
+`--firewall shadow`, or the gateway gets a policy file that classifies its tools.
 A tool the starter policy does not map to one of those capabilities is not refused
 by these rules. `--firewall shadow` writes the same refusals to the event stream and
 lets the calls through, so you can see what enforce would have done before you

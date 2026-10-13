@@ -81,8 +81,9 @@ while the arguments are still being read, before anything is built).
 
 5.00 is tokenfuse's own default run budget, so an ordinary run is unchanged and
 only a caller-declared larger budget is clamped. A clamped call's answer carries
-`x-fuse-budget-clamped: <ceiling>`. Measured 2026-10-04 on this launcher, a stack
-brought up with the real `up.sh` over a tokenfuse main build: a call declaring
+`x-fuse-budget-clamped: <ceiling>`. Measured 2026-10-04 on this launcher (pull
+request #41 records the run), a stack brought up with the real `up.sh` over a
+tokenfuse main build: a call declaring
 `x-fuse-budget-usd: 50` came back with `x-fuse-budget-clamped: 5.00`, a call
 declaring `1.00` carried no such header, and widening the same open run to `500`
 was clamped to `5.00` again.
@@ -124,9 +125,9 @@ curl -X POST http://127.0.0.1:4310/v1/revoke \
 curl http://127.0.0.1:4310/v1/revocations   # still lists the subject above
 ```
 
-Measured 2026-09-24 on this launcher: the subject above stayed listed after a
-full `./down.sh` / `./up.sh` cycle, `revoke.key`'s sha256 and its `0600` mode
-were unchanged before and after, and running `./up.sh` again while the stack
+Measured 2026-09-24 on this launcher (pull request #31 records the run): the
+subject above stayed listed after a full `./down.sh` / `./up.sh` cycle,
+`revoke.key`'s sha256 and its `0600` mode were unchanged before and after, and running `./up.sh` again while the stack
 was still up (no `down.sh` first) refused cleanly on the busy gateway port
 without touching the key.
 
@@ -138,8 +139,8 @@ pointing at this run's vouchryx and revoke key. `up.sh --with-delegation`
 prints the exact pair to export, in its closing summary, alongside the
 `curl` line above; it never starts `genaryx-web` itself.
 
-The whole loop below, measured on 2026-08-27 against this launcher, using the
-client vouchryx ships:
+The whole loop below, measured on 2026-08-27 against this launcher (pull request
+#18 records the run), using the client vouchryx ships:
 
 ```sh
 D=~/.stack-up/delegation; B=~/.taipan/bin
@@ -261,7 +262,9 @@ latency is the median per question.
 
 A model slower than typryx's own default of 2 seconds per question needs
 `TYPRYX_TIMEOUT_MS` exported before `./up.sh`; the launcher passes it through
-unchanged. Measured 2026-09-30 against a local Ollama serving qwen2.5:7b: with
+unchanged. On 2026-09-30, typryx launched the way `up.sh` launches it answered a
+real typed question from a local Ollama serving qwen2.5:7b (pull request #38
+records that run). The two timeout results are not kept in any pull request: with
 the default, one ask came back unanswered with reason `timeout`; with
 `TYPRYX_TIMEOUT_MS=60000` the same ask was answered in 1.8 seconds.
 
@@ -357,8 +360,9 @@ costcrew's own data directory off paths other planes read as their own.
 `agent-event/v1.0`, which trailryx-agentevent does not accept yet (it reads
 `v0.1` through `v0.3`), so trailryx-seal reads this file and refuses every
 line in it for `unknown_schema`, before the event type is ever inspected -
-measured 2026-09-26 against this launcher's own run. The practical outcome is
-the one roughly forty other unmapped or unrecognized event types already get
+measured 2026-09-26 against this launcher's own run (pull request #36). The
+practical outcome is the one roughly forty other unmapped or unrecognized event
+types already get
 on this bus (counted, not sealed; see "The record plane" below). Moving the
 journal onto the bus stops it being an unregistered source; it does not make
 trailryx seal it. `heraldyx` reads the whole events
@@ -407,16 +411,17 @@ identity, neither of which this sandbox has) to actually be recorded there**:
 agent-passport SPEC 6.1 forbids a fabricated agent id, so a brokered call that
 names nobody is served exactly the same and its `tool_call` record is
 silently skipped (tokenfuse `crates/gateway/src/mcpbroker.rs`,
-`emit_tool_call`); measured 2026-09-26, the same call without that header
-answered identically and left the file empty. The closing summary's own
+`emit_tool_call`); measured 2026-09-26 (pull request #36), the same call without
+that header answered identically and left the file empty. The closing summary's own
 example carries the header for this reason.
 
 **Recorded is still not the same as sealed.** `tool_call` is a type trailryx
 recognizes, unlike typryx's four, but the broker's own event carries no
 `run_id` (it has no run/budget/step state to put one in, the same reason its
 Wardryx context above sends cost, steps, and model empty), and trailryx's
-mapper refuses any line with none. Measured 2026-09-26: a `tool_call` line
-here is refused for `no_run_id`, not `unknown_schema` or `unknown_type` -
+mapper refuses any line with none. Measured 2026-09-26 (pull request #36): a
+`tool_call` line here is refused for `no_run_id`, not `unknown_schema` or
+`unknown_type` -
 counted, not sealed, the same outcome typryx's journal gets for a different
 reason.
 
@@ -465,8 +470,9 @@ curl -X PUT http://127.0.0.1:8090/v1/policies/risk-hold \
 ```
 
 Policies written this way live in wardryx's memory for the run (the seeded demo
-policy file is rewritten on every `./up.sh`). Measured 2026-10-04 on this launcher
-with the stub backend: a brokered call with no policy was allowed, and the decision
+policy file is rewritten on every `./up.sh`). Measured 2026-10-04 on this
+launcher (pull request #41 records the run) with the stub backend: a brokered call
+with no policy was allowed, and the decision
 event carried the call's name and target and an `action.risk_class` signal from
 `typryx`; after a test policy holding the stub's own answer (`read_only` at 0.3 and
 above, not the example above, because the stub's answers mean nothing) the same call
@@ -685,10 +691,11 @@ one of those (`scripts/bus-files-match-sources.sh` holds the list):
 
 idryx is loaded with `--load tokenfuse:tokenfuse.ndjson`, in `up.sh` and in the
 `idryx-detect` routine. Measured 2026-10-04 on a real run of `up.sh --with-typed
---typed-risk-signal --with-delegation --with-finops`: each of the first seven files
-that had a line held only lines claiming the source in its row (`vouchryx.ndjson`
-was still empty), and heraldyx v0.3.0 and idryx v1.1.0, run over that directory,
-printed no refusal and no unknown-stream notice. The `verdryx.ndjson` row is read from
+--typed-risk-signal --with-delegation --with-finops` (pull request #41 records
+it): seven files were read and six of them had a line. Each of those held only
+lines claiming the source in its row (`vouchryx.ndjson` was still empty), and
+heraldyx v0.3.0 and idryx v1.1.0, run over that directory, printed no refusal and
+no unknown-stream notice. The `verdryx.ndjson` row is read from
 the routine's code and `agent-conform.ndjson` was run through the `chain-verify`
 routine, not by `up.sh`.
 
@@ -713,9 +720,9 @@ STACK_UP_TRUST_DOMAIN=acme.example ./up.sh
 reading position even for a run that wrote nothing, so one pass under the wrong
 domain marks every line read and no later correction gets them back: the next
 pass answers `nothing new. The cursor is at byte N of N (40 line(s), 0
-record(s) so far)`. Measured on 2026-08-27, which is also the day this launcher
-was found to have sealed nothing but its own synthetic demo fleet while four
-real planes wrote to the same directory.
+record(s) so far)`. Measured on 2026-08-27 (pull request #19 records the run),
+which is also the day this launcher was found to have sealed nothing but its own
+synthetic demo fleet while four real planes wrote to the same directory.
 
 Partial refusal is normal and is not an error. This launcher mints under
 several domains on purpose: scopyx identifies its demo agent as

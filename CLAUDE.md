@@ -482,6 +482,10 @@ building here and the thing that most often gets skipped.
     defaults to shadow.** `@decided 2026-10-13` (paraphrased): personal data in
     prompts and tool arguments is recorded as an event and never refused, and an
     operator keeps one switch, `--pii off|shadow|mask|block`, to run them otherwise.
+    `@claude 2026-10-13`: "recorded as an event" in that paraphrase is wrong about the
+    mechanism, and the decision stands: shadow writes no event and no trace row. The
+    gateway adds an `x-fuse-dlp` header and the broker logs a warning, each with the
+    count and kinds found, and marks `_tokenfuse.dlp_pii` on tool responses.
     `up.sh` sets `TOKENFUSE_DLP_PII` on each gateway start and `TOKENFUSE_MCP_DLP_PII`
     on the MCP broker start, both from `PII_MODE`, which only `--pii` fills: never the
     caller's environment, never a literal. Any other word exits 2 at argument parsing,

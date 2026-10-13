@@ -152,9 +152,11 @@
 #                       README.md, "The agent firewall", says what enforce refuses.
 #   --pii <mode>        tokenfuse's PII masks on every gateway start
 #                       (TOKENFUSE_DLP_PII) and on the MCP broker start
-#                       (TOKENFUSE_MCP_DLP_PII): shadow (the default: personal
-#                       data in prompts and tool arguments is written to the event
-#                       stream and never refused), mask, block or off. Any other
+#                       (TOKENFUSE_MCP_DLP_PII): shadow (the default: the gateway
+#                       adds an x-fuse-dlp header and the broker logs a warning,
+#                       each with the count and kinds of personal data found;
+#                       nothing is refused and no event or trace row is written),
+#                       mask, block or off. Any other
 #                       word exits 2 at argument parsing, before anything is built.
 #                       README.md, "The PII masks", says what each mode does.
 #   --plan              resolve every choice above, print what would start and
@@ -332,6 +334,10 @@ FIREWALL_MODE="enforce"
 # prompts and tool arguments is recorded as an event and never refused, and one
 # switch, --pii, runs them in mask, block or off instead. It comes from --pii only,
 # never from the caller's environment, the same rule as the agent firewall.
+# @claude 2026-10-13: "recorded as an event" in the paraphrase above is wrong about the mechanism,
+# and the decision (shadow by default, never refused) stands: shadow writes no event and no trace row.
+# The gateway adds an x-fuse-dlp header and the broker logs a warning,
+# each with the count and kinds found, and marks _tokenfuse.dlp_pii on tool responses.
 # resolve_pii_mode refuses any other word, because a misspelling would switch the
 # scanner off silently.
 PII_MODE="shadow"

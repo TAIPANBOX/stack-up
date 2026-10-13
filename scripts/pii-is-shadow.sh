@@ -9,7 +9,10 @@
 # personal data in prompts or tool arguments. @decided 2026-10-13: the launcher runs
 # them in shadow by default, which writes what it finds to the event stream and
 # refuses nothing, and an operator keeps one switch, --pii off|shadow|mask|block, to
-# change that.
+# change that. @claude 2026-10-13: shadow writes no event and no trace row; the
+# gateway adds an x-fuse-dlp header and the broker logs a warning, each with the count
+# and kinds found, so "writes what it finds to the event stream" above is wrong about
+# the mechanism while the decision stands.
 #
 # tokenfuse's loaders keep off for any value they do not name, and say nothing
 # (crates/gateway/src/defaults.rs, dlp_pii_mode_from; the broker's own match in

@@ -678,7 +678,7 @@ resolve_pii_mode() {
 print_launch_plan() {
   printf 'launch: gateway run-budget ceiling: %s USD per run (TOKENFUSE_MAX_RUN_BUDGET_USD; a budget that comes from the caller, a policy default or the built-in default is clamped to it, a Cloud budget is not)\n' "$RUN_BUDGET_CEILING_USD"
   printf 'launch: agent firewall: %s (TOKENFUSE_FIREWALL on every gateway start; enforce refuses exec, write and network egress on a run that read untrusted input, and network egress on a run holding a secret; shadow records those refusals and lets them through; off turns the firewall off)\n' "$FIREWALL_MODE"
-  printf 'launch: PII masks: %s (TOKENFUSE_DLP_PII on every gateway start and TOKENFUSE_MCP_DLP_PII on the MCP broker; off records nothing, shadow records what it finds and refuses nothing, mask redacts it before it is forwarded, block refuses the call that carries it)\n' "$PII_MODE"
+  printf 'launch: PII masks: %s (TOKENFUSE_DLP_PII on every gateway start and TOKENFUSE_MCP_DLP_PII on the MCP broker; off records nothing, shadow notes how many and which kinds (a gateway response header, a broker log line; no event or trace row) and forwards the data unchanged, mask redacts it before it is forwarded, block refuses the call that carries it)\n' "$PII_MODE"
 }
 
 # resolve_cloud_key - an operator's own STACK_UP_CLOUD_KEY, refused here, before

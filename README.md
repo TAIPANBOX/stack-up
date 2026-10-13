@@ -760,8 +760,10 @@ choose it. `--firewall off` turns the firewall off: no taint tracking and no ref
 tokenfuse can scan what an agent sends for personal data: email addresses, card
 numbers that pass a Luhn check, and international phone numbers written with a `+`.
 `up.sh` runs the scanner in **shadow** on every gateway start and on the MCP broker.
-A hit is recorded as a count and the kinds found, never the text, and the call goes
-through unchanged. `--pii off|shadow|mask|block` changes that. Any other word exits
+A hit is noted as a count and the kinds found, never the text: the gateway adds an
+`x-fuse-dlp` header to its answer, the broker logs a warning and marks
+`_tokenfuse.dlp_pii` on tool responses. Neither writes an event or a trace row, and the
+call goes through unchanged, so the personal data still reaches the provider. `--pii off|shadow|mask|block` changes that. Any other word exits
 with status 2 while the arguments are still being read, before anything is built.
 
 ```sh

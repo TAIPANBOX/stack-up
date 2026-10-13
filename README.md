@@ -755,6 +755,27 @@ by these rules. `--firewall shadow` writes the same refusals to the event stream
 lets the calls through, so you can see what enforce would have done before you
 choose it. `--firewall off` turns the firewall off: no taint tracking and no refusals.
 
+### The PII masks
+
+tokenfuse can scan what an agent sends for personal data: email addresses, card
+numbers that pass a Luhn check, and international phone numbers written with a `+`.
+`up.sh` runs the scanner in **shadow** on every gateway start and on the MCP broker.
+A hit is recorded as a count and the kinds found, never the text, and the call goes
+through unchanged. `--pii off|shadow|mask|block` changes that. Any other word exits
+with status 2 while the arguments are still being read, before anything is built.
+
+```sh
+./up.sh --plan          # prints the PII mode, starting nothing
+./up.sh --pii mask      # replace each hit with [REDACTED:kind] before the call is forwarded
+./up.sh --pii block     # refuse a call that carries a hit (HTTP 403, error type dlp_blocked)
+./up.sh --pii off       # no PII scanning at all
+```
+
+tokenfuse itself keeps this scanner off until it is asked for, because its matches
+are heuristics over ordinary text and their false positives are prose. The launcher
+runs it in shadow so that a stand keeps a record of what passed through it, and it
+changes nothing else about a call.
+
 ## Options
 
 ```
@@ -778,6 +799,7 @@ choose it. `--firewall off` turns the firewall off: no taint tracking and no ref
 --typed-risk-signal  also run typryx wardryx-proxy and point the MCP broker at it (off by default; see "The typed risk signal")
 --run-budget-ceiling <usd>  the most one run may be granted (default 5.00; see "The gateway's run-budget ceiling")
 --firewall <mode>  the agent firewall: enforce (default), shadow or off (see "The agent firewall")
+--pii <mode>       personal-data masks: shadow (default), mask, block or off (see "The PII masks")
 --plan             print every resolved choice and exit, starting nothing (--typed-plan is the same flag)
 -h, --help         show help
 ```

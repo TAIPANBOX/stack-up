@@ -45,6 +45,9 @@ jobs:
       - name: every gateway start runs the agent firewall from the switch, default enforce
         run: ./scripts/firewall-is-enforce.sh
 
+      - name: every gateway start runs the PII masks from the switch, default shadow
+        run: ./scripts/pii-is-shadow.sh
+
       - name: the revocation key is never logged
         run: ./scripts/revoke-key-not-printed.sh
 

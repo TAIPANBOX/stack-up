@@ -150,6 +150,13 @@
 #                       what it would refuse and refuses nothing) or off. Any other
 #                       word exits 2 at argument parsing, before anything is built.
 #                       README.md, "The agent firewall", says what enforce refuses.
+#   --pii <mode>        tokenfuse's PII masks on every gateway start
+#                       (TOKENFUSE_DLP_PII) and on the MCP broker start
+#                       (TOKENFUSE_MCP_DLP_PII): shadow (the default: personal
+#                       data in prompts and tool arguments is written to the event
+#                       stream and never refused), mask, block or off. Any other
+#                       word exits 2 at argument parsing, before anything is built.
+#                       README.md, "The PII masks", says what each mode does.
 #   --plan              resolve every choice above, print what would start and
 #                       what would leave this machine (paths, never key
 #                       contents), and exit before building or starting
@@ -317,6 +324,17 @@ RUN_BUDGET_CEILING_ASKED=0
 # run-budget ceiling. resolve_firewall_mode refuses any other word, because tokenfuse
 # keeps its shadow default silently for a value it does not name.
 FIREWALL_MODE="enforce"
+# The PII masks, handed to every gateway start as TOKENFUSE_DLP_PII and to the MCP
+# broker start as TOKENFUSE_MCP_DLP_PII. tokenfuse keeps them off when the variable is
+# unset, and keeps off for any value it does not name, without a word
+# (crates/gateway/src/defaults.rs, dlp_pii_mode_from; the broker's match in
+# crates/gateway/src/main.rs). @decided 2026-10-13: shadow here, so personal data in
+# prompts and tool arguments is recorded as an event and never refused, and one
+# switch, --pii, runs them in mask, block or off instead. It comes from --pii only,
+# never from the caller's environment, the same rule as the agent firewall.
+# resolve_pii_mode refuses any other word, because a misspelling would switch the
+# scanner off silently.
+PII_MODE="shadow"
 FORCE_INSTALL=0
 WORKSPACE="${STACK_UP_WORKSPACE:-$(dirname "$SCRIPT_DIR")}"
 
@@ -359,6 +377,8 @@ while [ $# -gt 0 ]; do
     --run-budget-ceiling=*) RUN_BUDGET_CEILING_USD="${1#--run-budget-ceiling=}"; RUN_BUDGET_CEILING_ASKED=1 ;;
     --firewall) shift; FIREWALL_MODE="${1:-}" ;;
     --firewall=*) FIREWALL_MODE="${1#--firewall=}" ;;
+    --pii) shift; PII_MODE="${1:-}" ;;
+    --pii=*) PII_MODE="${1#--pii=}" ;;
     --typed-plan|--plan) TYPED_PLAN=1 ;;
     --force-install) FORCE_INSTALL=1 ;;
     --workspace) shift; WORKSPACE="${1:-}"; [ -n "$WORKSPACE" ] || { echo "stack-up: --workspace needs a directory" >&2; exit 2; } ;;
@@ -642,9 +662,23 @@ resolve_firewall_mode() {
   exit 2
 }
 
+# resolve_pii_mode - the PII masks' switch, refused here, before anything is built,
+# unless it is one of the four words tokenfuse reads. tokenfuse keeps the off default
+# for any other value without a word (defaults.rs, dlp_pii_mode_from; the broker's
+# match in main.rs), so a misspelling would switch the scanner off while the operator
+# believes it records. Case-sensitive, as tokenfuse is.
+resolve_pii_mode() {
+  case "$PII_MODE" in
+    off|shadow|mask|block) return 0 ;;
+  esac
+  echo "stack-up: --pii takes off, shadow, mask or block (got '$PII_MODE')" >&2
+  exit 2
+}
+
 print_launch_plan() {
   printf 'launch: gateway run-budget ceiling: %s USD per run (TOKENFUSE_MAX_RUN_BUDGET_USD; a budget that comes from the caller, a policy default or the built-in default is clamped to it, a Cloud budget is not)\n' "$RUN_BUDGET_CEILING_USD"
   printf 'launch: agent firewall: %s (TOKENFUSE_FIREWALL on every gateway start; enforce refuses exec, write and network egress on a run that read untrusted input, and network egress on a run holding a secret; shadow records those refusals and lets them through; off turns the firewall off)\n' "$FIREWALL_MODE"
+  printf 'launch: PII masks: %s (TOKENFUSE_DLP_PII on every gateway start and TOKENFUSE_MCP_DLP_PII on the MCP broker; off records nothing, shadow notes how many and which kinds (a gateway response header, a broker log line; no event or trace row) and forwards the data unchanged, mask redacts it before it is forwarded, block refuses the call that carries it)\n' "$PII_MODE"
 }
 
 # resolve_cloud_key - an operator's own STACK_UP_CLOUD_KEY, refused here, before
@@ -665,6 +699,7 @@ resolve_cloud_key() {
   exit 2
 }
 
+resolve_pii_mode
 resolve_firewall_mode
 resolve_cloud_key
 resolve_run_budget_ceiling
@@ -1660,6 +1695,10 @@ CLOUD_KEY="${STACK_UP_CLOUD_KEY:-$(rand_hex 16)}"
 # other word). It is a plain setting, not a secret, so it sits with the other
 # settings of each start. It is not on the mcp-broker below, which reads no firewall.
 # scripts/firewall-is-enforce.sh holds the starts.
+# The PII masks ride the same starts as TOKENFUSE_DLP_PII, from PII_MODE (shadow by
+# default; --pii changes it, and resolve_pii_mode refuses any other word). The MCP
+# broker start carries TOKENFUSE_MCP_DLP_PII from the same variable.
+# scripts/pii-is-shadow.sh holds the starts.
 log "starting gateway on :$GATEWAY_PORT (enforce, stub upstream, run budget ceiling $RUN_BUDGET_CEILING_USD USD, agent firewall $FIREWALL_MODE, reporting to the cloud)"
 if [ -n "$WARDRYX_URL" ]; then
   # ${a[@]+"${a[@]}"} and not "${a[@]}": under `set -u` bash 3.2, which is what
@@ -1681,6 +1720,7 @@ if [ -n "$WARDRYX_URL" ]; then
   TOKENFUSE_ADDR="127.0.0.1:$GATEWAY_PORT" \
   TOKENFUSE_MAX_RUN_BUDGET_USD="$RUN_BUDGET_CEILING_USD" \
   TOKENFUSE_FIREWALL="$FIREWALL_MODE" \
+  TOKENFUSE_DLP_PII="$PII_MODE" \
   TOKENFUSE_ALLOW_STUB="1" \
   TOKENFUSE_MODE="enforce" \
   TOKENFUSE_CACHE="off" \
@@ -1712,6 +1752,7 @@ else
   TOKENFUSE_ADDR="127.0.0.1:$GATEWAY_PORT" \
   TOKENFUSE_MAX_RUN_BUDGET_USD="$RUN_BUDGET_CEILING_USD" \
   TOKENFUSE_FIREWALL="$FIREWALL_MODE" \
+  TOKENFUSE_DLP_PII="$PII_MODE" \
   TOKENFUSE_ALLOW_STUB="1" \
   TOKENFUSE_MODE="enforce" \
   TOKENFUSE_CACHE="off" \
@@ -1805,6 +1846,22 @@ if [ "$WANT_POLICY" -eq 1 ]; then
 fi
 if [ "$WANT_POLICY" -eq 1 ]; then
   log "starting wardryx on :$WARDRYX_PORT (demo policy)"
+  # The allow-list rehearsal rule for the mockryx drill: the one agent the drill
+  # rehearses may call only lookup_order_status (@decided 2026-10-13). allow_tool is
+  # wardryx v1.3.0 and later. An older wardryx refuses the whole file at start ("field
+  # allow_tool not found"), and the gateway then fails open with no policy at all, so
+  # the rule is appended only when the binary that will run names allow_tool.
+  # Otherwise the rest of the demo policy starts, and this says why.
+  if bin_reads_setting "$WARDRYX_BIN" allow_tool; then
+    cat >> "$POLICY_FILE" <<'YAML'
+- name: mockryx-allow-list
+  target: "agent://mockryx.local/allow-list-rehearsal"
+  allow_tool:
+    - lookup_order_status
+YAML
+  else
+    warn "$WARDRYX_BIN predates wardryx v1.3.0 and does not read allow_tool, so the mockryx-allow-list rehearsal rule is not seeded. Update the wardryx checkout ($WARDRYX_REPO) so the next run rebuilds it."
+  fi
   # WARDRYX_ALLOW_DEVKEY: loopback dev run, the literal bearer devkey below;
   # harmless on a wardryx that does not read this variable yet, and needed
   # once it does (a future wardryx refuses to start with WARDRYX_KEYS empty
@@ -2306,6 +2363,7 @@ if [ "$WITH_TYPED" -eq 1 ]; then
   TOKENFUSE_MCP_SECRETS="typryx_key=$TYPRYX_SECRET" \
   TOKENFUSE_MCP_SECRET_SCOPES="typryx_key=tools:ask|ask_freeform|list_questions" \
   TOKENFUSE_EVENTS_PATH="$EVENTS_DIR/tokenfuse-mcp.ndjson" \
+  TOKENFUSE_MCP_DLP_PII="$PII_MODE" \
   env ${BROKER_WARDRYX_ENV[@]+"${BROKER_WARDRYX_ENV[@]}"} \
     "$GATEWAY_BIN" mcp-broker > "$LOGS_DIR/tokenfuse-mcp-broker.log" 2>&1 &
   register tokenfuse-mcp-broker "$!" TERM
@@ -2646,6 +2704,7 @@ log "events:  $EVENTS_DIR"
 log "logs:    $LOGS_DIR"
 log "budget:  the gateway clamps any one run's budget to $RUN_BUDGET_CEILING_USD USD when it comes from the caller, a policy default or the built-in default (--run-budget-ceiling; a Cloud budget is not clamped)"
 log "firewall: the gateway runs its agent firewall in $FIREWALL_MODE (--firewall enforce, shadow or off; see README.md, The agent firewall)"
+log "pii: the gateway and the MCP broker run tokenfuse's PII masks in $PII_MODE (--pii off, shadow, mask or block; see README.md, The PII masks)"
 log "declassify: POST http://127.0.0.1:$GATEWAY_PORT/v1/fuse/declassify clears a run's taint label and needs the header"
 log "         x-fuse-declassify-key: $GATEWAY_DECLASSIFY_KEY   (minted fresh this run, held in the gateway's environment only)"
 if [ "$WITH_DELEGATION" -eq 1 ]; then

@@ -34,6 +34,7 @@ bash -n up.sh && bash -n down.sh && bash -n routines.sh
 ./scripts/declassify-is-keyed.sh
 ./scripts/cloud-key-is-per-run.sh
 ./scripts/firewall-is-enforce.sh
+./scripts/pii-is-shadow.sh
 ./scripts/revoke-key-not-printed.sh
 ./scripts/typed-mode.sh
 ./scripts/run-budget-ceiling-is-set.sh
@@ -476,6 +477,27 @@ building here and the thing that most often gets skipped.
     capability on a run that read untrusted input. That is tokenfuse's own test (its
     invariants 25 to 27 and 93) and needs a built gateway; this gate proves only that
     the launcher hands the gateway the switch's value.)*
+
+19. **Every gateway start runs tokenfuse's PII masks from one switch, and the switch
+    defaults to shadow.** `@decided 2026-10-13` (paraphrased): personal data in
+    prompts and tool arguments is recorded as an event and never refused, and an
+    operator keeps one switch, `--pii off|shadow|mask|block`, to run them otherwise.
+    `up.sh` sets `TOKENFUSE_DLP_PII` on each gateway start and `TOKENFUSE_MCP_DLP_PII`
+    on the MCP broker start, both from `PII_MODE`, which only `--pii` fills: never the
+    caller's environment, never a literal. Any other word exits 2 at argument parsing,
+    because tokenfuse keeps its off default silently for a value it does not name.
+    `@claude 2026-10-13`: the flag's name, its four words and the refusal are my
+    choices under that decision; the shadow default is the decision.
+    *(gate: `scripts/pii-is-shadow.sh`: every gateway start carries exactly one
+    `TOKENFUSE_DLP_PII` assignment, taken from `"$PII_MODE"`; the default is
+    `PII_MODE="shadow"`; the broker start, where present, carries
+    `TOKENFUSE_MCP_DLP_PII` the same way; `--pii` accepts the four words and refuses
+    every other with exit 2, and a refusal or a plan creates no state directory. It
+    refuses to report OK with no up.sh, no GATEWAY_BIN, no gateway start or no
+    `--plan`. 16 cases in `gates-have-teeth.sh`, 13 fault and 3 pass. Not covered: that
+    a running gateway records a personal-data hit in shadow and refuses one in block,
+    which is tokenfuse's own test and needs a built gateway; and that a gateway binary
+    names the setting, which the launcher does not check.)*
 
 An approved architecture decision is **not finished** until it is two things: a
 numbered invariant in this file, and a gate in a script if it can be checked

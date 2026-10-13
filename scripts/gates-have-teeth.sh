@@ -781,6 +781,85 @@ run_case "firewall-is-enforce: no up.sh left to read" fail \
 subprocess.run(["git", "mv", "up.sh", "up.bash"], check=True)')" \
 	"measured nothing"
 
+# invariant 19: every gateway start runs tokenfuse's PII masks from one switch, and the
+# switch defaults to shadow. A start that loses the setting runs with the scanner off
+# and says nothing.
+run_case "pii-is-shadow: one gateway start drops TOKENFUSE_DLP_PII" fail \
+	'./scripts/pii-is-shadow.sh' \
+	"$(py 'edit("up.sh", "  TOKENFUSE_DLP_PII=\"$PII_MODE\" \\\n", "")')" \
+	"does not set TOKENFUSE_DLP_PII"
+
+# A start that writes off in place of the switch cannot be reached by --pii.
+run_case "pii-is-shadow: one gateway start sets off in place of the switch" fail \
+	'./scripts/pii-is-shadow.sh' \
+	"$(py 'edit("up.sh", "TOKENFUSE_DLP_PII=\"$PII_MODE\"", "TOKENFUSE_DLP_PII=\"off\"")')" \
+	"is not set from"
+
+run_case "pii-is-shadow: the default becomes off" fail \
+	'./scripts/pii-is-shadow.sh' \
+	"$(py 'edit("up.sh", "PII_MODE=\"shadow\"", "PII_MODE=\"off\"")')" \
+	"the PII default is not"
+
+# block refuses a call that carries personal data, so a default of block is a promise
+# nobody asked the launcher to make.
+run_case "pii-is-shadow: the default becomes block" fail \
+	'./scripts/pii-is-shadow.sh' \
+	"$(py 'edit("up.sh", "PII_MODE=\"shadow\"", "PII_MODE=\"block\"")')" \
+	"the PII default is not"
+
+# A default read from the caller's environment is an export changing what a stand records.
+run_case "pii-is-shadow: the default is read from the caller's environment" fail \
+	'./scripts/pii-is-shadow.sh' \
+	"$(py 'edit("up.sh", "PII_MODE=\"shadow\"", "PII_MODE=\"${TOKENFUSE_DLP_PII:-shadow}\"")')" \
+	"the PII default is not"
+
+# The broker is a second place the scanner is switched, and it is judged on its own.
+run_case "pii-is-shadow: the MCP broker start drops TOKENFUSE_MCP_DLP_PII" fail \
+	'./scripts/pii-is-shadow.sh' \
+	"$(py 'edit("up.sh", "  TOKENFUSE_MCP_DLP_PII=\"$PII_MODE\" \\\n", "")')" \
+	"does not set TOKENFUSE_MCP_DLP_PII"
+
+run_case "pii-is-shadow: the MCP broker start sets off in place of the switch" fail \
+	'./scripts/pii-is-shadow.sh' \
+	"$(py 'edit("up.sh", "TOKENFUSE_MCP_DLP_PII=\"$PII_MODE\"", "TOKENFUSE_MCP_DLP_PII=\"off\"")')" \
+	"is not set from"
+
+# tokenfuse keeps off silently for a word it does not name, so the launcher must refuse
+# every word that is not one of the four before anything is built.
+run_case "pii-is-shadow: the validation is removed" fail \
+	'./scripts/pii-is-shadow.sh' \
+	"$(py 'edit("up.sh", "resolve_pii_mode\nresolve_firewall_mode\n", "resolve_firewall_mode\n")')" \
+	"wanted 2 naming the flag"
+
+run_case "pii-is-shadow: a mode tokenfuse would not read is accepted" fail \
+	'./scripts/pii-is-shadow.sh' \
+	"$(py 'edit("up.sh", "off|shadow|mask|block) return 0", "off|shadow|mask|block|on) return 0")')" \
+	"wanted 2 naming the flag"
+
+run_case "pii-is-shadow: the plan stops naming the mode" fail \
+	'./scripts/pii-is-shadow.sh' \
+	"$(py 'edit("up.sh", "launch: PII masks: %s", "launch: PII %s")')" \
+	"does not name the PII masks"
+
+run_case "pii-is-shadow: up.sh stops taking --plan" fail \
+	'./scripts/pii-is-shadow.sh' \
+	"$(py 'edit("up.sh", "--typed-plan|--plan) TYPED_PLAN=1 ;;", "--typed-plan|--planned) TYPED_PLAN=1 ;;")')" \
+	"has no --plan"
+
+run_case "pii-is-shadow: no gateway start left to judge" fail \
+	'./scripts/pii-is-shadow.sh' \
+	"$(py 's = open("up.sh").read()
+t = s.replace("\"$GATEWAY_BIN\" > \"$LOGS_DIR/gateway.log\" 2>&1 &", "gateway_launcher > \"$LOGS_DIR/gateway.log\" 2>&1 &")
+assert t != s
+open("up.sh", "w").write(t)')" \
+	"nowhere, so this measured nothing"
+
+run_case "pii-is-shadow: no up.sh left to read" fail \
+	'./scripts/pii-is-shadow.sh' \
+	"$(py 'import subprocess
+subprocess.run(["git", "mv", "up.sh", "up.bash"], check=True)')" \
+	"measured nothing"
+
 echo
 echo "=== and what they must NOT catch ==="
 
@@ -929,6 +1008,21 @@ run_case "firewall-is-enforce: an unrelated var added to the gateway block" pass
 run_case "firewall-is-enforce: a second mcp-broker start is not mistaken for a gateway start" pass \
 	'./scripts/firewall-is-enforce.sh' \
 	"$(py 'edit("up.sh", "\n  register tokenfuse-mcp-broker \"$!\" TERM\n", "\n  register tokenfuse-mcp-broker \"$!\" TERM\n  TOKENFUSE_MCP_ADDR=\"127.0.0.1:9999\" \\\n    \"$GATEWAY_BIN\" mcp-broker > /dev/null 2>&1 &\n")')"
+
+# A comment that names the other two words is prose, and the gate reads the commands.
+run_case "pii-is-shadow: a comment naming off and block is not a setting" pass \
+	'./scripts/pii-is-shadow.sh' \
+	"$(py 'edit("up.sh", "log \"starting gateway on :$GATEWAY_PORT", "# A comment that names off and block, the other two words, changes nothing here.\nlog \"starting gateway on :$GATEWAY_PORT")')"
+
+run_case "pii-is-shadow: an unrelated var added to the gateway block" pass \
+	'./scripts/pii-is-shadow.sh' \
+	"$(py 'edit("up.sh", "  TOKENFUSE_CACHE=\"off\" \\\n", "  TOKENFUSE_CACHE=\"off\" \\\n  TOKENFUSE_STACK_UP_NOTE=\"unrelated\" \\\n")')"
+
+# A comment naming the broker's variable with another value, above the broker launch,
+# is prose: the broker's own start still carries the switch and nothing else.
+run_case "pii-is-shadow: a comment naming the broker's variable is not a setting" pass \
+	'./scripts/pii-is-shadow.sh' \
+	"$(py 'edit("up.sh", "log \"starting tokenfuse-mcp-broker on :", "# TOKENFUSE_MCP_DLP_PII=off would stop the broker scanning; this comment sets nothing.\nlog \"starting tokenfuse-mcp-broker on :")')"
 
 echo
 echo "=== and the one this estate learned the hard way ==="

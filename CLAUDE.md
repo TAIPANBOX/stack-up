@@ -33,6 +33,8 @@ bash -n up.sh && bash -n down.sh && bash -n routines.sh
 ./scripts/gateway-cache-is-off.sh
 ./scripts/declassify-is-keyed.sh
 ./scripts/cloud-key-is-per-run.sh
+./scripts/admin-keys-are-per-run.sh
+./scripts/wardryx-fails-closed.sh
 ./scripts/firewall-is-enforce.sh
 ./scripts/pii-is-shadow.sh
 ./scripts/revoke-key-not-printed.sh
@@ -502,6 +504,40 @@ building here and the thing that most often gets skipped.
     a running gateway records a personal-data hit in shadow and refuses one in block,
     which is tokenfuse's own test and needs a built gateway; and that a gateway binary
     names the setting, which the launcher does not check.)*
+
+20. **The gateway fails closed on its policy decision point, and the launcher stops when that point does not come up.**
+    `@decided 2026-10-17` (paraphrased): a gateway wired to the policy plane refuses a decision it cannot get,
+    and a stand whose gateway is wired to it does not run without it. tokenfuse's default fail mode is open,
+    which allows a call whose decision never arrives, so every gateway start that sets `TOKENFUSE_WARDRYX_MODE`
+    also sets `TOKENFUSE_WARDRYX_FAILMODE=closed`. The wardryx health wait ends in `|| die`: a wardryx that does
+    not answer, or cannot be fetched or built, exits the launcher with a non-zero status after the EXIT trap has
+    stopped what it started. Nothing that the launcher prints says the gateway will fail open.
+    `@claude 2026-10-17`: the fail mode and the stop are my reading of the decision. The variable's name and its
+    two words (`open`, `closed`) were read in tokenfuse's `defaults.rs` (`wardryx_failmode_from`); what the closed
+    branch does with an unanswered decision was not read here and not run.
+    *(gate: `scripts/wardryx-fails-closed.sh`: every gateway start that sets `TOKENFUSE_WARDRYX_MODE` sets
+    `TOKENFUSE_WARDRYX_FAILMODE` to the literal `"closed"`; the wardryx health wait ends in `|| die`; no non-comment
+    line says fail open; the wardryx block never sets `WANT_POLICY=0` after the gateway is wired to it. 9 fault
+    cases and 1 pass case in `gates-have-teeth.sh`; `features/the-policy-plane-fails-closed.feature`, 6 scenarios.
+    Not covered: a running gateway refusing a decision while wardryx is silent, which is tokenfuse's own test and
+    needs a built gateway. Also not covered: the preflight drops wardryx before the gateway is wired to it (a busy
+    port, a missing toolchain). That path is unchanged, and the gateway then has no policy plane at all.)*
+
+21. **The gateway's admin routes need a key minted for the run, and the key is never printed.**
+    `@decided 2026-10-17` (paraphrased): the admin routes include the kill switch, so each run gives its gateway
+    an admin key of its own and tells the operator which file holds it. `up.sh` mints `GATEWAY_ADMIN_KEY` with
+    `rand_hex 24` above the first gateway start and refuses an empty result. Each gateway start takes it as
+    `TOKENFUSE_ADMIN_KEYS`, a prefix assignment ahead of `env`. The value goes to `$STACK_UP_HOME/gateway-admin.key`,
+    made 0600, and the closing summary names that path and nothing else.
+    `@claude 2026-10-17`: the file name, the example request and the key's length are my choices; tokenfuse's
+    admin gate was read in its `adminkeys.rs` and not run here.
+    *(gate: `scripts/admin-keys-are-per-run.sh`: every gateway start takes `TOKENFUSE_ADMIN_KEYS` from one run
+    variable as a prefix assignment ahead of `env`; that variable is minted with `rand_hex` above the first start,
+    with a refusal on empty right after; the value is written to a file that is `chmod 600`; no other non-comment
+    line names it. 10 fault cases and 1 pass case in `gates-have-teeth.sh`; `features/the-admin-key-is-minted-per-run.feature`,
+    6 scenarios. Not covered: a running gateway refusing a call with no key, which needs a built gateway; that the
+    value is private inside a process environment (`/proc/<pid>/environ`, `ps eww`); and the `mcp-broker`
+    subcommand, which is not given the key and whose own routes were not checked.)*
 
 An approved architecture decision is **not finished** until it is two things: a
 numbered invariant in this file, and a gate in a script if it can be checked

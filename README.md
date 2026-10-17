@@ -47,7 +47,10 @@ Everything binds to `127.0.0.1` only.
 
 The money plane (gateway + cloud + dashboard) is mandatory; the rest degrade
 gracefully. If a toolchain or a port is missing, stack-up says so and brings up
-what it can, rather than failing the whole run.
+what it can, rather than failing the whole run. wardryx is the exception once the
+gateway is wired to it: the gateway refuses every decision it cannot get from
+wardryx (`TOKENFUSE_WARDRYX_FAILMODE=closed`), so a wardryx that does not come up
+stops the run with exit status 1, and the processes it had started are stopped.
 
 ### The gateway's declassify key
 
@@ -563,7 +566,8 @@ The money plane has two independent faces, and stack-up runs both:
 - The **gateway** (`:4100`) is the live enforcement proxy. Point an Anthropic
   Messages API client at it (`POST /v1/messages`) and every call is metered
   against a per-run budget, with a hard 402 when it is spent. Its own view is
-  `GET :4100/v1/runs`.
+  `GET :4100/v1/runs`, which needs this run's admin key (see "This is a sandbox,
+  not a deployment").
 - The **cloud** (`:8080`) is the aggregate control plane, and the **dashboard**
   reads from it. Cloud is populated by anything posting call records to its
   ungated `POST /v1/ingest`. stack-up points the gateway at cloud, so your live
@@ -830,8 +834,8 @@ a deliberate stop and exits 0; a refusal such as a gateway that will not start e
 with 1 too, so a script driving `up.sh` can tell). This is a single-host launcher, not a
 supervisor: nothing is restarted, and a half-alive stand would mislead more
 than a stopped one. To watch how the planes behave when one of them is gone
-(the gateway fails open on the policy plane and records it; scopyx fails
-closed), start those planes by hand with the same environment `up.sh` gives
+(the gateway refuses every decision it cannot get from wardryx, and scopyx fails
+closed too), start those planes by hand with the same environment `up.sh` gives
 them, outside the launcher.
 
 ## Scheduled governance runs
@@ -932,6 +936,15 @@ line up numerically - that is expected, not a bug.
   fallback (tokenfuse#380), and a cloud started with that variable now refuses
   to start. wardryx on this launcher still runs in its own dev-key mode
   (`WARDRYX_ALLOW_DEVKEY=1`, loopback only), which is a separate setting.
+- The gateway's admin routes (`GET /v1/runs`, `POST /v1/runs/{id}/kill`,
+  `GET /v1/keys`, `GET /v1/policy-plane`, `GET /v1/agent-ids`) need this run's
+  admin key. The key is written to `~/.stack-up/gateway-admin.key` (mode 0600),
+  a new one each run, and the summary names that file without printing the
+  value. The kill switch is one of these routes:
+
+  ```bash
+  curl -H "Authorization: Bearer $(cat ~/.stack-up/gateway-admin.key)" http://127.0.0.1:4100/v1/runs
+  ```
 - `idryx serve` has no authentication of its own by design (loopback only).
 - The gateway clamps one run's caller-declared budget to the run-budget ceiling
   (5.00 USD by default, `--run-budget-ceiling`; see "The gateway's run-budget
@@ -974,6 +987,7 @@ Everything that is only stack-up's business stays under `~/.stack-up/`
                plane was skipped)
   logs/        one log file per service
   pids/        recorded PIDs, used by down.sh
+  gateway-admin.key  the gateway's admin key for this run (mode 0600)
   typryx/      ledger only, only with --with-typed (its journal is now in
                events/typryx.ndjson above; see "Typed answers" above)
   routines/    routines.sh's own state: history, the latest record per routine,

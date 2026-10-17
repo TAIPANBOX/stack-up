@@ -1447,8 +1447,12 @@ if ! bin_reads_setting "$GATEWAY_BIN" TOKENFUSE_MAX_RUN_BUDGET_USD; then
 fi
 
 # Prepare wardryx wiring before the gateway starts, so the gateway can consult
-# it from the moment it comes up (matches the taipan ordering). If wardryx then
-# fails to start, the gateway fails open (its default), so this is safe.
+# it from the moment it comes up (matches the taipan ordering). The gateway is
+# started with TOKENFUSE_WARDRYX_FAILMODE=closed, so when wardryx is silent it
+# refuses every decision rather than allowing it (tokenfuse's own default is
+# open). Once this is wired, a wardryx that does not come up stops the launcher
+# below; it is never left out while the gateway still points at it.
+# scripts/wardryx-fails-closed.sh holds both halves.
 WARDRYX_URL=""
 if [ "$WANT_POLICY" -eq 1 ]; then
   WARDRYX_URL="http://127.0.0.1:$WARDRYX_PORT"
@@ -1662,6 +1666,23 @@ GATEWAY_DECLASSIFY_KEY="$(rand_hex 24)"
 [ -n "$GATEWAY_DECLASSIFY_KEY" ] \
   || die "could not mint the gateway's declassify key (no openssl, and /dev/urandom gave nothing); refusing to start a gateway whose declassify endpoint would be open."
 
+# The gateway's admin routes: GET /v1/runs, POST /v1/runs/{id}/kill, GET /v1/keys,
+# GET /v1/policy-plane and GET /v1/agent-ids. With TOKENFUSE_ADMIN_KEYS unset, any
+# process on this machine can call them, and the kill switch is one of them. So
+# the gateway gets a key minted for this run, the same way as the others above.
+# The value goes to a 0600 file in the state directory, and the summary names
+# that file and never prints the value. scripts/admin-keys-are-per-run.sh holds
+# every half of this.
+GATEWAY_ADMIN_KEY="$(rand_hex 24)"
+[ -n "$GATEWAY_ADMIN_KEY" ] \
+  || die "could not mint the gateway's admin key (no openssl, and /dev/urandom gave nothing); refusing to start a gateway whose admin routes would be open."
+GATEWAY_ADMIN_KEY_FILE="$STACK_UP_HOME/gateway-admin.key"
+rm -f "$GATEWAY_ADMIN_KEY_FILE"
+if ! ( umask 077; printf '%s\n' "$GATEWAY_ADMIN_KEY" > "$GATEWAY_ADMIN_KEY_FILE" ) \
+   || ! chmod 600 "$GATEWAY_ADMIN_KEY_FILE"; then
+  die "could not write $GATEWAY_ADMIN_KEY_FILE; refusing to start a gateway whose admin key nobody could read."
+fi
+
 # The cloud's key for this run: ONE key, used everywhere this launcher talks to
 # the cloud. The cloud is started with it as TOKENFUSE_CLOUD_KEYS
 # "<key>:default:admin" (the same org, role and no-site the old fallback had),
@@ -1716,12 +1737,13 @@ if [ -n "$WARDRYX_URL" ]; then
   # defaults to shadow mode, which takes one global mutex per call and walks
   # up to 10,000 cached entries computing cosine similarity, serving nothing.
   # tokenfuse#319.
-  # TOKENFUSE_DECLASSIFY_KEY and TOKENFUSE_CLOUD_KEY are prefix assignments
-  # BEFORE `env`, not arguments to it: env would put the value on its own
-  # command line for the moment before it execs the gateway, where `ps` can
-  # read it. A prefix assignment lands in the environment of the process only.
+  # TOKENFUSE_DECLASSIFY_KEY, TOKENFUSE_ADMIN_KEYS and TOKENFUSE_CLOUD_KEY are
+  # prefix assignments BEFORE `env`, not arguments to it: env would put the value
+  # on its own command line for the moment before it execs the gateway, where
+  # `ps` can read it. A prefix assignment lands in the environment of the process only.
   TOKENFUSE_CLOUD_KEY="$CLOUD_KEY" \
   TOKENFUSE_DECLASSIFY_KEY="$GATEWAY_DECLASSIFY_KEY" \
+  TOKENFUSE_ADMIN_KEYS="$GATEWAY_ADMIN_KEY" \
   env ${DELEG_ENV[@]+"${DELEG_ENV[@]}"} \
   TOKENFUSE_ADDR="127.0.0.1:$GATEWAY_PORT" \
   TOKENFUSE_MAX_RUN_BUDGET_USD="$RUN_BUDGET_CEILING_USD" \
@@ -1734,6 +1756,7 @@ if [ -n "$WARDRYX_URL" ]; then
   TOKENFUSE_DATA_DIR="$STACK_UP_HOME/traces/gateway" \
   TOKENFUSE_CLOUD_URL="http://127.0.0.1:$CLOUD_PORT" \
   TOKENFUSE_WARDRYX_MODE="enforce" \
+  TOKENFUSE_WARDRYX_FAILMODE="closed" \
   TOKENFUSE_WARDRYX_URL="$WARDRYX_URL" \
   TOKENFUSE_WARDRYX_KEY="devkey" \
   TOKENFUSE_WARDRYX_TIMEOUT_MS="2000" \
@@ -1748,12 +1771,13 @@ else
   # defaults to shadow mode, which takes one global mutex per call and walks
   # up to 10,000 cached entries computing cosine similarity, serving nothing.
   # tokenfuse#319.
-  # TOKENFUSE_DECLASSIFY_KEY and TOKENFUSE_CLOUD_KEY are prefix assignments
-  # BEFORE `env`, not arguments to it: env would put the value on its own
-  # command line for the moment before it execs the gateway, where `ps` can
-  # read it. A prefix assignment lands in the environment of the process only.
+  # TOKENFUSE_DECLASSIFY_KEY, TOKENFUSE_ADMIN_KEYS and TOKENFUSE_CLOUD_KEY are
+  # prefix assignments BEFORE `env`, not arguments to it: env would put the value
+  # on its own command line for the moment before it execs the gateway, where
+  # `ps` can read it. A prefix assignment lands in the environment of the process only.
   TOKENFUSE_CLOUD_KEY="$CLOUD_KEY" \
   TOKENFUSE_DECLASSIFY_KEY="$GATEWAY_DECLASSIFY_KEY" \
+  TOKENFUSE_ADMIN_KEYS="$GATEWAY_ADMIN_KEY" \
   env ${DELEG_ENV[@]+"${DELEG_ENV[@]}"} \
   TOKENFUSE_ADDR="127.0.0.1:$GATEWAY_PORT" \
   TOKENFUSE_MAX_RUN_BUDGET_USD="$RUN_BUDGET_CEILING_USD" \
@@ -1831,7 +1855,7 @@ fi
 # --------------------------------------------------------------------------
 
 if [ "$WANT_POLICY" -eq 1 ]; then
-  WARDRYX_REPO="$(locate_repo wardryx Wardryx)" || { warn "could not fetch wardryx; skipping."; WANT_POLICY=0; }
+  WARDRYX_REPO="$(locate_repo wardryx Wardryx)" || die "could not fetch wardryx, and the gateway started above is already wired to it; refusing to run it without its policy plane."
 fi
 if [ "$WANT_POLICY" -eq 1 ]; then
   migrate_legacy wardryx
@@ -1844,7 +1868,7 @@ if [ "$WANT_POLICY" -eq 1 ]; then
     log "wardryx: building (Go)"
     if ! ( cd "$WARDRYX_REPO" && go build -o "$BUILD_DIR/wardryx" ./cmd/wardryx ) \
        || ! install_binary wardryx "$BUILD_DIR/wardryx"; then
-      warn "wardryx build failed; skipping."; WANT_POLICY=0
+      die "wardryx build failed, and the gateway started above is already wired to it; refusing to run it without its policy plane. See the build output above."
     else
       : > "$MARKERS_DIR/.marker-wardryx"
     fi
@@ -1855,8 +1879,9 @@ if [ "$WANT_POLICY" -eq 1 ]; then
   # The allow-list rehearsal rule for the mockryx drill: the one agent the drill
   # rehearses may call only lookup_order_status (@decided 2026-10-13). allow_tool is
   # wardryx v1.3.0 and later. An older wardryx refuses the whole file at start ("field
-  # allow_tool not found"), and the gateway then fails open with no policy at all, so
-  # the rule is appended only when the binary that will run names allow_tool.
+  # allow_tool not found"), and wardryx then does not come up, which stops this run
+  # (the gateway is wired to it and would refuse every decision). So the rule is
+  # appended only when the binary that will run names allow_tool.
   # Otherwise the rest of the demo policy starts, and this says why.
   if bin_reads_setting "$WARDRYX_BIN" allow_tool; then
     cat >> "$POLICY_FILE" <<'YAML'
@@ -1879,7 +1904,9 @@ YAML
     "$WARDRYX_BIN" serve -addr "127.0.0.1:$WARDRYX_PORT" -events "$EVENTS_DIR/wardryx.ndjson" -policy "$POLICY_FILE" \
     > "$LOGS_DIR/wardryx.log" 2>&1 &
   register wardryx "$!" TERM
-  wait_health wardryx "$WARDRYX_PORT" "$!" || warn "wardryx did not come up; the gateway will fail open. Continuing."
+  # The gateway above is wired to this PDP and fails closed on it, so a wardryx
+  # that does not answer stops the stand here; the EXIT trap stops what started.
+  wait_health wardryx "$WARDRYX_PORT" "$!" || die "wardryx did not come up; the gateway refuses every decision without it (TOKENFUSE_WARDRYX_FAILMODE=closed), so the stand stops. See $LOGS_DIR/wardryx.log."
 fi
 
 # --------------------------------------------------------------------------
@@ -2713,6 +2740,11 @@ log "firewall: the gateway runs its agent firewall in $FIREWALL_MODE (--firewall
 log "pii: the gateway and the MCP broker run tokenfuse's PII masks in $PII_MODE (--pii off, shadow, mask or block; see README.md, The PII masks)"
 log "declassify: POST http://127.0.0.1:$GATEWAY_PORT/v1/fuse/declassify clears a run's taint label and needs the header"
 log "         x-fuse-declassify-key: $GATEWAY_DECLASSIFY_KEY   (minted fresh this run, held in the gateway's environment only)"
+log "admin:   the gateway's admin routes (GET /v1/runs, POST /v1/runs/{id}/kill, GET /v1/keys, GET /v1/policy-plane, GET /v1/agent-ids) need this run's key"
+log "         it is in $GATEWAY_ADMIN_KEY_FILE (mode 0600, minted fresh this run, not printed here). For example:"
+# shellcheck disable=SC2016
+# The $(cat ...) is text for the operator to run, not an expansion here.
+printf '  curl -H "Authorization: Bearer $(cat %s)" http://127.0.0.1:%s/v1/runs\n' "$GATEWAY_ADMIN_KEY_FILE" "$GATEWAY_PORT"
 if [ "$WITH_DELEGATION" -eq 1 ]; then
   log "revoke:  POST http://127.0.0.1:$VOUCHRYX_PORT/v1/revoke   (bearer: key in $DELEG_DIR/revoke.key)"
   log "         survives a restart: ./down.sh then ./up.sh keeps every revocation in force"

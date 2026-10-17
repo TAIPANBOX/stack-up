@@ -1233,6 +1233,121 @@ run_case "cloud-key-is-per-run: no cloud start left to judge" fail \
 	"$(py 'edit("up.sh", "  \"$CLOUD_BIN\" > \"$LOGS_DIR/cloud.log\"", "  \"$CLOUD_BINARY\" > \"$LOGS_DIR/cloud.log\"")')" \
 	"measured nothing"
 
+# wardryx-fails-closed (invariant 20): the gateway is wired to wardryx with a
+# closed fail mode, and the launcher stops when wardryx does not come up.
+run_case "wardryx-fails-closed: the gateway's fail mode is not set" fail \
+	'./scripts/wardryx-fails-closed.sh' \
+	"$(py 'edit("up.sh", "TOKENFUSE_WARDRYX_FAILMODE=\"closed\"", "TOKENFUSE_WARDRYX_FAILMOD_GONE=\"closed\"")')" \
+	"does not set TOKENFUSE_WARDRYX_FAILMODE"
+
+run_case "wardryx-fails-closed: the gateway's fail mode is open" fail \
+	'./scripts/wardryx-fails-closed.sh' \
+	"$(py 'edit("up.sh", "TOKENFUSE_WARDRYX_FAILMODE=\"closed\"", "TOKENFUSE_WARDRYX_FAILMODE=\"open\"")')" \
+	"not closed"
+
+run_case "wardryx-fails-closed: a wardryx that does not come up is only a warning" fail \
+	'./scripts/wardryx-fails-closed.sh' \
+	"$(py 'edit("up.sh", "|| die \"wardryx did not come up", "|| warn \"wardryx did not come up")')" \
+	"with a warning"
+
+run_case "wardryx-fails-closed: a failed build continues without wardryx" fail \
+	'./scripts/wardryx-fails-closed.sh' \
+	"$(py 'edit("up.sh", "die \"wardryx build failed, ", "{ warn \"wardryx build failed; skipping.\"; WANT_POLICY=0; } ; : \"")')" \
+	"turns the policy plane off"
+
+run_case "wardryx-fails-closed: a failed fetch continues without wardryx" fail \
+	'./scripts/wardryx-fails-closed.sh' \
+	"$(py 'edit("up.sh", "|| die \"could not fetch wardryx, ", "|| { warn \"could not fetch wardryx; skipping.\"; WANT_POLICY=0; } ; : \"")')" \
+	"turns the policy plane off"
+
+run_case "wardryx-fails-closed: the launcher says the gateway will fail open" fail \
+	'./scripts/wardryx-fails-closed.sh' \
+	"$(py 'edit("up.sh", "log \"events:  $EVENTS_DIR\"", "log \"events:  $EVENTS_DIR\"; log \"wardryx down: the gateway will fail open\"")')" \
+	"fail open"
+
+run_case "wardryx-fails-closed: the wardryx wait is renamed away" fail \
+	'./scripts/wardryx-fails-closed.sh' \
+	"$(py 'edit("up.sh", "wait_health wardryx \"$WARDRYX_PORT\"", "wait_health wardryxx \"$WARDRYX_PORT\"")')" \
+	"measured nothing"
+
+run_case "wardryx-fails-closed: no gateway start wired to wardryx left to judge" fail \
+	'./scripts/wardryx-fails-closed.sh' \
+	"$(py 'edit("up.sh", "TOKENFUSE_WARDRYX_MODE=\"enforce\"", "TOKENFUSE_WARDRYX_MODEX=\"enforce\"")')" \
+	"measured nothing"
+
+run_case "wardryx-fails-closed: no up.sh left to read" fail \
+	'./scripts/wardryx-fails-closed.sh' \
+	"$(py 'import subprocess, os
+assert os.path.exists("up.sh"), "expected up.sh"
+subprocess.run(["git", "mv", "up.sh", "up.bash"], check=True)')" \
+	"measured nothing"
+
+run_case "wardryx-fails-closed: a comment that says fail open is not a fault" pass \
+	'./scripts/wardryx-fails-closed.sh' \
+	"$(py 'edit("up.sh", "# Wardryx (optional): policy decision point with the seeded demo policy.", "# Wardryx (optional): policy decision point with the seeded demo policy.\n# Prose that says the gateway fails open is a comment, not a message.")')"
+
+# admin-keys-are-per-run (invariant 21): the gateway's admin routes take a key
+# minted for the run from the environment, and the value is never printed.
+run_case "admin-keys-are-per-run: a gateway start does not set the admin keys" fail \
+	'./scripts/admin-keys-are-per-run.sh' \
+	"$(py 'edit("up.sh", "TOKENFUSE_ADMIN_KEYS=\"$GATEWAY_ADMIN_KEY\"", "TOKENFUSE_ADMIN_KEYX=\"$GATEWAY_ADMIN_KEY\"")')" \
+	"does not set TOKENFUSE_ADMIN_KEYS"
+
+run_case "admin-keys-are-per-run: the admin keys are a literal" fail \
+	'./scripts/admin-keys-are-per-run.sh' \
+	"$(py 'edit("up.sh", "TOKENFUSE_ADMIN_KEYS=\"$GATEWAY_ADMIN_KEY\"", "TOKENFUSE_ADMIN_KEYS=\"devkey\"")')" \
+	"from something other than a run variable"
+
+run_case "admin-keys-are-per-run: the admin key is an argument to env" fail \
+	'./scripts/admin-keys-are-per-run.sh' \
+	"$(py 'edit("up.sh", "TOKENFUSE_ADMIN_KEYS=\"$GATEWAY_ADMIN_KEY\"", "ADMIN_LATER=1")
+edit("up.sh", "  env ${DELEG_ENV[@]+", "  env TOKENFUSE_ADMIN_KEYS=\"$GATEWAY_ADMIN_KEY\" ${DELEG_ENV[@]+")')" \
+	"argument to env"
+
+run_case "admin-keys-are-per-run: the admin key is never minted" fail \
+	'./scripts/admin-keys-are-per-run.sh' \
+	"$(py 'edit("up.sh", "GATEWAY_ADMIN_KEY=\"$(rand_hex 24)\"", "GATEWAY_ADMIN_KEY=\"0123456789abcdef0123456789abcdef0123456789abcdef\"")')" \
+	"not minted with rand_hex"
+
+run_case "admin-keys-are-per-run: no refusal after the mint" fail \
+	'./scripts/admin-keys-are-per-run.sh' \
+	"$(py 'edit("up.sh", "[ -n \"$GATEWAY_ADMIN_KEY\" ]", ":")')" \
+	"no refusal on an empty"
+
+run_case "admin-keys-are-per-run: the key is printed to the terminal" fail \
+	'./scripts/admin-keys-are-per-run.sh' \
+	"$(py 'edit("up.sh", "log \"events:  $EVENTS_DIR\"", "log \"events:  $EVENTS_DIR\"; log \"admin key: $GATEWAY_ADMIN_KEY\"")')" \
+	"outside the gateway's environment and its 0600 file"
+
+run_case "admin-keys-are-per-run: the key is never written to a file" fail \
+	'./scripts/admin-keys-are-per-run.sh' \
+	"$(py 'edit("up.sh", "> \"$GATEWAY_ADMIN_KEY_FILE\"", "> /dev/null")')" \
+	"never written to a file"
+
+run_case "admin-keys-are-per-run: the key file is not made 0600" fail \
+	'./scripts/admin-keys-are-per-run.sh' \
+	"$(py 'edit("up.sh", "chmod 600 \"$GATEWAY_ADMIN_KEY_FILE\"", "chmod 644 \"$GATEWAY_ADMIN_KEY_FILE\"")')" \
+	"not made 0600"
+
+run_case "admin-keys-are-per-run: no up.sh left to read" fail \
+	'./scripts/admin-keys-are-per-run.sh' \
+	"$(py 'import subprocess, os
+assert os.path.exists("up.sh"), "expected up.sh"
+subprocess.run(["git", "mv", "up.sh", "up.bash"], check=True)')" \
+	"measured nothing"
+
+run_case "admin-keys-are-per-run: no gateway start left to judge" fail \
+	'./scripts/admin-keys-are-per-run.sh' \
+	"$(py 's = open("up.sh").read()
+assert s.count("\"$GATEWAY_BIN\" > \"$LOGS_DIR/gateway.log\"") == 2, "expected two gateway starts"
+s = s.replace("\"$GATEWAY_BIN\" > \"$LOGS_DIR/gateway.log\"", "\"$GATEWAYX\" > \"$LOGS_DIR/gateway.log\"")
+open("up.sh", "w").write(s)')" \
+	"measured nothing"
+
+run_case "admin-keys-are-per-run: a comment that names the key variable is not a print" pass \
+	'./scripts/admin-keys-are-per-run.sh' \
+	"$(py 'edit("up.sh", "# scripts/declassify-is-keyed.sh holds both halves.", "# scripts/declassify-is-keyed.sh holds both halves.\n# GATEWAY_ADMIN_KEY is named in this comment only.")')"
+
 echo
 if [ -n "$(git status --porcelain)" ]; then
 	printf 'FAIL: this script left the tree dirty, so it cannot be trusted about anything above\n'

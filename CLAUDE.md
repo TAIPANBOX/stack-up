@@ -35,6 +35,7 @@ bash -n up.sh && bash -n down.sh && bash -n routines.sh
 ./scripts/cloud-key-is-per-run.sh
 ./scripts/admin-keys-are-per-run.sh
 ./scripts/postures-are-held.sh
+./scripts/keyryx-is-per-run.sh
 ./scripts/wardryx-fails-closed.sh
 ./scripts/firewall-is-enforce.sh
 ./scripts/pii-is-shadow.sh
@@ -564,6 +565,37 @@ building here and the thing that most often gets skipped.
     `features/the-launcher-holds-its-postures.feature`, 9 scenarios. Not covered: a running gateway refusing a call with no key, a running wardryx refusing
     a viewer, and the broker's DLP and scan refusing a secret or a poisoned tool; these need built
     binaries. The broker's block settings were not run against typryx's own tool descriptions.)*
+
+23. **keyryx runs per run: custody holds wardryx's approval key, the witness reads the record from its own process, and no key value leaves the launcher.**
+    `@decided 2026-10-18` (paraphrased, from the agent-security review's wave 2 design): key custody
+    and an independent witness of the record, both off every request path, with wardryx's approvals
+    signed by custody and not by a shared secret. `@claude 2026-10-18`: the shape here is my reading of
+    that decision for a launcher, not a stated decision. `up.sh` builds keyryx from the commit that
+    `KEYRYX_TAG` names, refused unless the clone is `KEYRYX_COMMIT`, because keyryx v0.1.0 publishes a
+    container image and no binary and this launcher runs no containers. It mints three values per run
+    above the first custody start, each refused when empty: the custody root key and the witness root
+    key (`rand_hex 32`, each in its own 0600 file under `$STACK_UP_HOME/keyryx`) and the bearer key
+    wardryx presents to custody (`rand_hex 24`, written with no trailing newline). The policy names one
+    consumer, wardryx, by the SHA-256 of that bearer key, and one held key, `wardryx-approval`. Custody
+    and the witness each get a fresh data directory, and the two directories differ. wardryx starts with
+    `WARDRYX_APPROVAL_SIGNER=keyryx`, its custody URL and its key file, and without
+    `WARDRYX_APPROVAL_SECRET`; the launcher refuses to start a wardryx binary that does not name the
+    signer. The witness writes its alerts to its own data directory, not to the shared bus, because
+    heraldyx does not render keyryx's events yet. The witness is optional and says so when it does not
+    come up; custody is not, because wardryx cannot sign without it.
+    *(gate: `scripts/keyryx-is-per-run.sh`: the keyryx pin is a 40-hex commit and a tag; custody and the
+    witness take their data directory and root key file from run variables, and the two data
+    directories differ; each root key is minted with `rand_hex` above the first custody start and refused
+    when empty; the key files are written under `umask 077` and made 0600; the wardryx start names the
+    keyryx signer, the custody URL and the key file, takes no approval secret, and the launcher checks the
+    binary names the signer; no key value reaches a log, warn, die or echo line, a printf that is not a
+    file write, or a keyryx or wardryx command line; it refuses OK when it found no custody, witness or
+    wardryx start. 18 fault cases and 2 pass cases in `gates-have-teeth.sh`;
+    `features/the-keyryx-custody-and-witness-run-per-run.feature`, 7 scenarios. Not covered: that a running
+    custody refuses a consumer it does not know, that the witness finds a rewrite (keyryx's own tests,
+    keyryx v0.1.0 `internal/witness`, and its built-binary test), and that a process keeps its key from
+    the same user (`/proc/<pid>/environ` and argv are readable by that user). The launcher runs as one
+    OS user, so custody and the witness are separated by process and directory only, not by uid.)*
 
 An approved architecture decision is **not finished** until it is two things: a
 numbered invariant in this file, and a gate in a script if it can be checked

@@ -42,6 +42,8 @@
           "cloud",
           "costcrew",
           "dashboard",
+          "keyryx",
+          "keyryx-witness",
           "gateway",
           "heraldyx",
           "idryx",
@@ -142,6 +144,18 @@
         "tokenfuse_cloud_key_is_minted_per_run": {
           "value": "TOKENFUSE_CLOUD_KEYS=\"$CLOUD_KEY:default:admin\", CLOUD_KEY minted with rand_hex 16 per run or taken from STACK_UP_CLOUD_KEY; the gateway's TOKENFUSE_CLOUD_KEY, the demo seed and the dashboard link use the same key; TOKENFUSE_CLOUD_ALLOW_DEVKEY is never set",
           "why": "@claude 2026-10-09: tokenfuse#380 removes the cloud's devkey fallback; a cloud started with TOKENFUSE_CLOUD_ALLOW_DEVKEY set exits 2 and an empty key set authenticates nobody, which is how this launcher ran the cloud. The key is minted above the first gateway start because the gateway starts first. Wardryx's and scopyx's own dev-key mode (WARDRYX_ALLOW_DEVKEY, SCOPYX_WARDRYX_KEY) is a separate decision and unchanged. Held by scripts/cloud-key-is-per-run.sh, CLAUDE.md invariant 17."
+        },
+        "keyryx_is_built_from_a_pinned_commit": {
+          "value": "KEYRYX_TAG=\"v0.1.0\", KEYRYX_COMMIT=\"e87afc6e93e711191442d63d83abd84dbbcb19d6\"; the clone is refused unless HEAD is that commit, and the binary is built from it with go build ./cmd/keyryx",
+          "why": "@claude 2026-10-18: keyryx v0.1.0 publishes a container image (ghcr.io/taipanbox/keyryx) and no binary, and this launcher runs no containers, so it builds the commit the tag names. The tag's object peels to that commit on GitHub (gh api commits/v0.1.0, read 2026-10-18). Held by scripts/keyryx-is-per-run.sh, CLAUDE.md invariant 23."
+        },
+        "keyryx_consumers_wired_only_when_released": {
+          "value": "wardryx v2.2.0 is wired (WARDRYX_APPROVAL_SIGNER=keyryx); vouchryx and tokenfuse are not wired, and their version pins are the ones to set when they are released: vouchryx v0.5.0, tokenfuse v1.17.0",
+          "why": "@claude 2026-10-18: neither vouchryx v0.5.0 nor tokenfuse v1.17.0 had a GitHub release when this was written, so there is nothing to wire against. Their wiring (VOUCHRYX_SIGNER, TOKENFUSE_DELEGATION_JWKS_URL, TOKENFUSE_CLOUD_AUDIT_SIGNER) waits for a released binary that names the setting, judged at launch the way bin_reads_setting already judges the others."
+        },
+        "keyryx_witness_alerts_stay_off_the_bus": {
+          "value": "the witness writes $STACK_UP_HOME/keyryx/witness/alerts.ndjson, not $STACK_UP_HOME/events/keyryx.ndjson",
+          "why": "@claude 2026-10-18: heraldyx does not render keyryx's event types until its H1 change is released, and the bus-file contract (CLAUDE.md invariant 14) would need a new source entry in bus-files-match-sources.sh for a file nothing reads yet. Revisit when heraldyx renders the keyryx source."
         }
       }
     }

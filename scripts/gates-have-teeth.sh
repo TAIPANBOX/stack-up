@@ -1440,6 +1440,105 @@ run_case "postures-are-held: a comment that names the client key is not a fault"
 	'./scripts/postures-are-held.sh' \
 	"$(py 'edit("up.sh", "so the secret is on no argv.", "so the secret is on no argv.\n  # curl -H \"x-fuse-key: $GATEWAY_CLIENT_SECRET\" would put it on an argv.")')"
 
+run_case "keyryx-is-per-run: custody and witness share a data directory" fail \
+	'./scripts/keyryx-is-per-run.sh' \
+	"$(py 'edit("up.sh", "KEYRYX_WITNESS_DIR=\"$KEYRYX_DIR/witness\"", "KEYRYX_WITNESS_DIR=\"$KEYRYX_DIR/custody\"")')" \
+	"share a data directory"
+
+run_case "keyryx-is-per-run: custody takes its root key from a literal" fail \
+	'./scripts/keyryx-is-per-run.sh' \
+	"$(py 'edit("up.sh", "KEYRYX_ROOT_KEY_FILE=\"$KEYRYX_CUSTODY_ROOT_KEY_PATH\"", "KEYRYX_ROOT_KEY_FILE=\"/tmp/custody-root.key\"")')" \
+	"does not carry KEYRYX_ROOT_KEY_FILE"
+
+run_case "keyryx-is-per-run: the witness takes custody's root key" fail \
+	'./scripts/keyryx-is-per-run.sh' \
+	"$(py 'edit("up.sh", "KEYRYX_WITNESS_ROOT_KEY_FILE=\"$KEYRYX_WITNESS_ROOT_KEY_PATH\"", "KEYRYX_WITNESS_ROOT_KEY_FILE=\"$KEYRYX_CUSTODY_ROOT_KEY_PATH\"")')" \
+	"does not carry KEYRYX_WITNESS_ROOT_KEY_FILE"
+
+run_case "keyryx-is-per-run: the custody root key is a fixed string, not minted" fail \
+	'./scripts/keyryx-is-per-run.sh' \
+	"$(py 'edit("up.sh", "KEYRYX_CUSTODY_ROOT_KEY=\"$(rand_hex 32)\"", "KEYRYX_CUSTODY_ROOT_KEY=\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"")')" \
+	"KEYRYX_CUSTODY_ROOT_KEY is not minted with rand_hex"
+
+run_case "keyryx-is-per-run: no refusal after the custody root key mint" fail \
+	'./scripts/keyryx-is-per-run.sh' \
+	"$(py 'edit("up.sh", "[ -n \"$KEYRYX_CUSTODY_ROOT_KEY\" ]", ":")')" \
+	"no refusal on an empty KEYRYX_CUSTODY_ROOT_KEY"
+
+run_case "keyryx-is-per-run: the custody root key is minted after custody starts" fail \
+	'./scripts/keyryx-is-per-run.sh' \
+	"$(py 'edit("up.sh", "KEYRYX_CUSTODY_ROOT_KEY=\"$(rand_hex 32)\"", "KEYRYX_CUSTODY_ROOT_KEY_EARLY=1")
+edit("up.sh", "register keyryx \"$!\" TERM", "register keyryx \"$!\" TERM\n  KEYRYX_CUSTODY_ROOT_KEY=\"$(rand_hex 32)\"")')" \
+	"the custody root key is minted after the custody starts"
+
+run_case "keyryx-is-per-run: the custody root key is logged" fail \
+	'./scripts/keyryx-is-per-run.sh' \
+	"$(py 'edit("up.sh", "  log \"starting the keyryx witness", "  log \"custody root $KEYRYX_CUSTODY_ROOT_KEY\"\n  log \"starting the keyryx witness")')" \
+	"KEYRYX_CUSTODY_ROOT_KEY reaches a log, warn, die or echo line"
+
+run_case "keyryx-is-per-run: the wardryx key is logged" fail \
+	'./scripts/keyryx-is-per-run.sh' \
+	"$(py 'edit("up.sh", "  log \"starting the keyryx witness", "  log \"wardryx key $KEYRYX_WARDRYX_KEY\"\n  log \"starting the keyryx witness")')" \
+	"KEYRYX_WARDRYX_KEY reaches a log, warn, die or echo line"
+
+run_case "keyryx-is-per-run: the custody root key is on the custody command line" fail \
+	'./scripts/keyryx-is-per-run.sh' \
+	"$(py 'edit("up.sh", "\"$KEYRYX_BIN\" custody > ", "KEYRYX_ROOT_KEY_VALUE=\"$KEYRYX_CUSTODY_ROOT_KEY\" \"$KEYRYX_BIN\" custody > ")')" \
+	"is on the command line of a keyryx or wardryx process"
+
+run_case "keyryx-is-per-run: the custody root key file is not made 0600" fail \
+	'./scripts/keyryx-is-per-run.sh' \
+	"$(py 'edit("up.sh", "chmod 600 \"$KEYRYX_CUSTODY_ROOT_KEY_PATH\"", "chmod 644 \"$KEYRYX_CUSTODY_ROOT_KEY_PATH\"")')" \
+	"KEYRYX_CUSTODY_ROOT_KEY_PATH is not made 0600"
+
+run_case "keyryx-is-per-run: the wardryx key file is not made 0600" fail \
+	'./scripts/keyryx-is-per-run.sh' \
+	"$(py 'edit("up.sh", "chmod 600 \"$KEYRYX_WARDRYX_KEY_PATH\"", "chmod 644 \"$KEYRYX_WARDRYX_KEY_PATH\"")')" \
+	"KEYRYX_WARDRYX_KEY_PATH is not made 0600"
+
+run_case "keyryx-is-per-run: the key files are written under the default umask" fail \
+	'./scripts/keyryx-is-per-run.sh' \
+	"$(py 'edit("up.sh", "  if ! ( umask 077\n", "  if ! ( umask 022\n")')" \
+	"not written under umask 077"
+
+run_case "keyryx-is-per-run: wardryx is started without the keyryx signer" fail \
+	'./scripts/keyryx-is-per-run.sh' \
+	"$(py 'edit("up.sh", "WARDRYX_APPROVAL_SIGNER=keyryx \\", "WARDRYX_APPROVAL_SIGNER_OFF=keyryx \\")')" \
+	"does not carry WARDRYX_APPROVAL_SIGNER"
+
+run_case "keyryx-is-per-run: wardryx keeps an approval secret" fail \
+	'./scripts/keyryx-is-per-run.sh' \
+	"$(py 'edit("up.sh", "WARDRYX_APPROVAL_SIGNER=keyryx \\\n", "WARDRYX_APPROVAL_SIGNER=keyryx \\\n  WARDRYX_APPROVAL_SECRET=\"$(rand_hex 32)\" \\\n")')" \
+	"still takes WARDRYX_APPROVAL_SECRET"
+
+run_case "keyryx-is-per-run: the wardryx binary is not checked for the signer" fail \
+	'./scripts/keyryx-is-per-run.sh' \
+	"$(py 'edit("up.sh", "bin_reads_setting \"$WARDRYX_BIN\" WARDRYX_APPROVAL_SIGNER", ": \"$WARDRYX_BIN\" WARDRYX_APPROVAL_SIGNER")')" \
+	"is not checked for WARDRYX_APPROVAL_SIGNER"
+
+run_case "keyryx-is-per-run: the witness alerts go onto the shared bus" fail \
+	'./scripts/keyryx-is-per-run.sh' \
+	"$(py 'edit("up.sh", "KEYRYX_WITNESS_ALERTS=\"$KEYRYX_WITNESS_DIR/alerts.ndjson\"", "KEYRYX_WITNESS_ALERTS=\"$EVENTS_DIR/keyryx.ndjson\"")')" \
+	"does not carry KEYRYX_WITNESS_ALERTS"
+
+run_case "keyryx-is-per-run: the pin is a branch name, not a commit" fail \
+	'./scripts/keyryx-is-per-run.sh' \
+	"$(py 'edit("up.sh", "KEYRYX_COMMIT=\"e87afc6e93e711191442d63d83abd84dbbcb19d6\"", "KEYRYX_COMMIT=\"main\"")')" \
+	"keyryx is not pinned to a commit"
+
+run_case "keyryx-is-per-run: no custody start to judge" fail \
+	'./scripts/keyryx-is-per-run.sh' \
+	"$(py 'edit("up.sh", "\"$KEYRYX_BIN\" custody > ", "\"$KEYRYX_BIN\" cust0dy > ")')" \
+	"measured nothing"
+
+run_case "keyryx-is-per-run: a log line that names the root key file is not a fault" pass \
+	'./scripts/keyryx-is-per-run.sh' \
+	"$(py 'edit("up.sh", "  log \"starting the keyryx witness", "  log \"custody root key file: $KEYRYX_CUSTODY_ROOT_KEY_PATH\"\n  log \"starting the keyryx witness")')"
+
+run_case "keyryx-is-per-run: a comment that names the root key is not a fault" pass \
+	'./scripts/keyryx-is-per-run.sh' \
+	"$(py 'edit("up.sh", "  log \"starting the keyryx witness", "  # $KEYRYX_CUSTODY_ROOT_KEY is never logged or put on a command line.\n  log \"starting the keyryx witness")')"
+
 echo
 if [ -n "$(git status --porcelain)" ]; then
 	printf 'FAIL: this script left the tree dirty, so it cannot be trusted about anything above\n'

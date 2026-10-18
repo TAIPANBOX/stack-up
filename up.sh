@@ -14,6 +14,8 @@
 #   tokenfuse-cloud     :8080   money-plane control API (a key minted per run)
 #   dashboard           :3000   the money-plane dashboard (static, in a browser)
 #   wardryx             :8090   policy decision point (seeded demo policy)
+#   keyryx              :4340   key custody: wardryx's approval key (with wardryx)
+#   keyryx witness      :4341   reads the event streams, writes none of them
 #   idryx               :8081   identity/access graph (its own :8080 collides)
 #   heraldyx            no port the notifier, reading the shared event log and
 #                       writing what it WOULD mail to ~/.stack-up/mail.txt
@@ -226,6 +228,23 @@ REPOS_DIR="$STACK_UP_HOME/repos"
 # builds with the SAME `.marker-<name>` filenames in that same directory, so
 # sharing it would have each installer silently validating the other's build.
 MARKERS_DIR="$STACK_UP_HOME/markers"
+# keyryx's state, rebuilt every run (invariant 23): custody and the witness each
+# get their own data directory and their own root key, and the wardryx key file
+# is the bearer key wardryx presents to custody. Nothing here survives a run, so
+# a root key can never orphan the keys a previous run wrapped under another.
+KEYRYX_DIR="$STACK_UP_HOME/keyryx"
+KEYRYX_CUSTODY_DIR="$KEYRYX_DIR/custody"
+KEYRYX_WITNESS_DIR="$KEYRYX_DIR/witness"
+KEYRYX_CUSTODY_ROOT_KEY_PATH="$KEYRYX_DIR/custody-root.key"
+KEYRYX_WITNESS_ROOT_KEY_PATH="$KEYRYX_DIR/witness-root.key"
+KEYRYX_POLICY_PATH="$KEYRYX_DIR/policy.json"
+KEYRYX_WARDRYX_KEY_PATH="$KEYRYX_DIR/wardryx.key"
+# keyryx is built from this tag's commit and nothing else. v0.1.0 publishes a
+# container image and no binary, and this launcher runs no containers, so the
+# commit the tag names is what gets built, and the clone is refused unless it is
+# that commit. Moving keyryx is changing these two lines, nothing else.
+KEYRYX_TAG="v0.1.0"
+KEYRYX_COMMIT="e87afc6e93e711191442d63d83abd84dbbcb19d6"
 # Where a build lands before it is installed, so nothing is ever compiled
 # directly onto a path something else may be reading or executing.
 BUILD_DIR="$STACK_UP_HOME/build"
@@ -255,6 +274,10 @@ CLOUD_PORT=8080
 DASH_PORT=3000
 WARDRYX_PORT=8090
 IDRYX_PORT=8081
+# keyryx: custody (wardryx's approval key) and the witness of the record. Both are
+# keyryx's own defaults (KEYRYX_ADDR 127.0.0.1:4340, witness 127.0.0.1:4341).
+KEYRYX_PORT=4340
+KEYRYX_WITNESS_PORT=4341
 SCOPYX_PORT=4300
 VOUCHRYX_PORT=4310
 COSTCREW_PORT=8321
@@ -1363,6 +1386,12 @@ if [ "$WANT_POLICY" -eq 1 ] && port_busy "$WARDRYX_PORT"; then
   warn "port $WARDRYX_PORT is busy: skipping wardryx."
   WANT_POLICY=0
 fi
+# wardryx signs its approvals through keyryx, so a taken keyryx port takes wardryx
+# with it. Checked here, before anything starts, like the wardryx port above.
+if [ "$WANT_POLICY" -eq 1 ] && { port_busy "$KEYRYX_PORT" || port_busy "$KEYRYX_WITNESS_PORT"; }; then
+  warn "port $KEYRYX_PORT or $KEYRYX_WITNESS_PORT is busy: skipping wardryx, which signs its approvals through keyryx."
+  WANT_POLICY=0
+fi
 if [ "$WANT_IDENTITY" -eq 1 ] && port_busy "$IDRYX_PORT"; then
   warn "port $IDRYX_PORT is busy: skipping idryx."
   WANT_IDENTITY=0
@@ -1471,7 +1500,6 @@ if [ "$WANT_POLICY" -eq 1 ]; then
   deny_tool:
     - shell_exec
 YAML
-  WARDRYX_APPROVAL_SECRET="$(rand_hex 32)"
 fi
 
 # gateway: enforce mode, agent-event export on, reporting to the local cloud,
@@ -1897,6 +1925,119 @@ if [ "$WANT_DASHBOARD" -eq 1 ] && [ -f "$DASH_OUT/index.html" ]; then
 fi
 
 # --------------------------------------------------------------------------
+# Keyryx (with wardryx): key custody, and the witness of the record.
+# --------------------------------------------------------------------------
+# Custody holds the key wardryx signs approvals with (wardryx v2.2.0 with
+# WARDRYX_APPROVAL_SIGNER=keyryx, keyryx's wardryx-approval key). The witness
+# reads the same event streams from a process of its own and holds nothing that
+# custody signs with. Both are per run (invariant 23): fresh data directories,
+# fresh root keys, and no key value in the terminal, a log or an argv.
+#
+# Only with the policy plane. keyryx has no other consumer in this launcher, and
+# a stand without wardryx has no approval to sign.
+if [ "$WANT_POLICY" -eq 1 ]; then
+  KEYRYX_REPO="$REPOS_DIR/keyryx"
+  if [ "$(git -C "$KEYRYX_REPO" rev-parse HEAD 2>/dev/null)" != "$KEYRYX_COMMIT" ]; then
+    rm -rf "$KEYRYX_REPO"
+    log "cloning keyryx $KEYRYX_TAG ..."
+    git clone --quiet --depth 1 --branch "$KEYRYX_TAG" "$GH/keyryx.git" "$KEYRYX_REPO" 2>/dev/null \
+      || die "could not clone keyryx $KEYRYX_TAG. wardryx signs its approvals through keyryx, and the stand will not run without it."
+  fi
+  [ "$(git -C "$KEYRYX_REPO" rev-parse HEAD 2>/dev/null)" = "$KEYRYX_COMMIT" ] \
+    || die "keyryx $KEYRYX_TAG is not the commit this launcher pins ($KEYRYX_COMMIT); refusing to build it."
+
+  KEYRYX_BIN="$BIN_DIR/keyryx"
+  if foreign_binary keyryx; then
+    die "$KEYRYX_BIN was installed by another tool, and this launcher builds keyryx $KEYRYX_TAG; remove it or run again with --force-install."
+  elif installed_by_us keyryx && [ "$(cat "$MARKERS_DIR/.keyryx-commit" 2>/dev/null)" = "$KEYRYX_COMMIT" ]; then
+    log "keyryx: $KEYRYX_TAG already built, skipping build"
+  else
+    log "keyryx: building $KEYRYX_TAG (Go)"
+    if ! ( cd "$KEYRYX_REPO" && go build -o "$BUILD_DIR/keyryx" ./cmd/keyryx ) \
+       || ! install_binary keyryx "$BUILD_DIR/keyryx"; then
+      die "keyryx build failed, and wardryx cannot sign approvals without it. See the build output above."
+    fi
+    printf '%s\n' "$KEYRYX_COMMIT" > "$MARKERS_DIR/.keyryx-commit"
+  fi
+
+  # Per-run state: nothing from an earlier run is reused, so a root key cannot be
+  # left unable to open the keys a previous run wrapped under another.
+  port_busy "$KEYRYX_PORT" && die "port $KEYRYX_PORT is busy; keyryx custody cannot listen there."
+  port_busy "$KEYRYX_WITNESS_PORT" && die "port $KEYRYX_WITNESS_PORT is busy; the keyryx witness cannot listen there."
+  rm -rf "$KEYRYX_DIR"
+  mkdir -p "$KEYRYX_CUSTODY_DIR" "$KEYRYX_WITNESS_DIR" \
+    || die "could not create the keyryx state under $KEYRYX_DIR."
+  chmod 700 "$KEYRYX_CUSTODY_DIR" "$KEYRYX_WITNESS_DIR" \
+    || die "could not make the keyryx data directories 0700."
+
+  # The three values, minted above the first keyryx start. Each refusal follows its
+  # mint: the root key file is read at start, and an empty value would start a
+  # custody that wraps its keys under nothing.
+  KEYRYX_CUSTODY_ROOT_KEY="$(rand_hex 32)"
+  [ -n "$KEYRYX_CUSTODY_ROOT_KEY" ] \
+    || die "could not mint keyryx's custody root key (no openssl, and /dev/urandom gave nothing); refusing to start custody without one."
+  KEYRYX_WITNESS_ROOT_KEY="$(rand_hex 32)"
+  [ -n "$KEYRYX_WITNESS_ROOT_KEY" ] \
+    || die "could not mint keyryx's witness root key (no openssl, and /dev/urandom gave nothing); refusing to start the witness without one."
+  KEYRYX_WARDRYX_KEY="$(rand_hex 24)"
+  [ -n "$KEYRYX_WARDRYX_KEY" ] \
+    || die "could not mint the key wardryx presents to keyryx (no openssl, and /dev/urandom gave nothing); refusing to start custody that would admit nobody."
+
+  # The key files are written under umask 077 and made 0600. The wardryx key is
+  # written with no trailing newline, so the bytes wardryx presents are exactly the
+  # bytes the policy's digest was taken from.
+  if ! ( umask 077
+         printf '%s\n' "$KEYRYX_CUSTODY_ROOT_KEY" > "$KEYRYX_CUSTODY_ROOT_KEY_PATH"
+         printf '%s\n' "$KEYRYX_WITNESS_ROOT_KEY" > "$KEYRYX_WITNESS_ROOT_KEY_PATH"
+         printf '%s' "$KEYRYX_WARDRYX_KEY" > "$KEYRYX_WARDRYX_KEY_PATH" ); then
+    die "could not write keyryx's key files under $KEYRYX_DIR; refusing to start custody whose keys nobody could read."
+  fi
+  chmod 600 "$KEYRYX_CUSTODY_ROOT_KEY_PATH" || die "could not make $KEYRYX_CUSTODY_ROOT_KEY_PATH 0600."
+  chmod 600 "$KEYRYX_WITNESS_ROOT_KEY_PATH" || die "could not make $KEYRYX_WITNESS_ROOT_KEY_PATH 0600."
+  chmod 600 "$KEYRYX_WARDRYX_KEY_PATH" || die "could not make $KEYRYX_WARDRYX_KEY_PATH 0600."
+
+  # The policy names one consumer, wardryx, by the digest of its bearer key, and
+  # one held key it may sign with. The digest is public; the key stays in its file.
+  KEYRYX_WARDRYX_DIGEST="$(file_sha "$KEYRYX_WARDRYX_KEY_PATH")"
+  [ -n "$KEYRYX_WARDRYX_DIGEST" ] \
+    || die "could not hash wardryx's keyryx key; refusing to write a custody policy that names nobody."
+  cat > "$KEYRYX_POLICY_PATH" <<JSON
+{"version": 1,
+ "keys": [{"name": "wardryx-approval", "alg": "ES256"}],
+ "consumers": [{"name": "wardryx", "auth": {"key_digest": "sha256:$KEYRYX_WARDRYX_DIGEST"},
+                "grants": {"wardryx-approval": ["sign"]}}]}
+JSON
+
+  log "starting keyryx custody on :$KEYRYX_PORT (wardryx's approval key)"
+  KEYRYX_ADDR="127.0.0.1:$KEYRYX_PORT" \
+  KEYRYX_DATA="$KEYRYX_CUSTODY_DIR" \
+  KEYRYX_ROOT_KEY_FILE="$KEYRYX_CUSTODY_ROOT_KEY_PATH" \
+  KEYRYX_POLICY="$KEYRYX_POLICY_PATH" \
+    "$KEYRYX_BIN" custody > "$LOGS_DIR/keyryx.log" 2>&1 &
+  register keyryx "$!" TERM
+  # wardryx signs grants through custody and fails a grant it cannot sign (503,
+  # the hold stays pending), so a custody that does not answer stops the stand.
+  wait_health keyryx "$KEYRYX_PORT" "$!" \
+    || die "keyryx custody did not come up; wardryx cannot sign approvals without it, so the stand stops. See $LOGS_DIR/keyryx.log."
+
+  # The witness reads the streams and the public key routes of custody, and its
+  # alerts stay in its own data directory: the shared bus is not written from here.
+  log "starting the keyryx witness on :$KEYRYX_WITNESS_PORT (reads the event streams, writes none of them)"
+  KEYRYX_WITNESS_ADDR="127.0.0.1:$KEYRYX_WITNESS_PORT" \
+  KEYRYX_WITNESS_DATA="$KEYRYX_WITNESS_DIR" \
+  KEYRYX_WITNESS_ROOT_KEY_FILE="$KEYRYX_WITNESS_ROOT_KEY_PATH" \
+  KEYRYX_WITNESS_EVENTS="$EVENTS_DIR" \
+  KEYRYX_WITNESS_CUSTODY_URL="http://127.0.0.1:$KEYRYX_PORT" \
+  KEYRYX_WITNESS_ALERTS="$KEYRYX_WITNESS_DIR/alerts.ndjson" \
+    "$KEYRYX_BIN" witness > "$LOGS_DIR/keyryx-witness.log" 2>&1 &
+  register keyryx-witness "$!" TERM
+  # The witness is optional, unlike custody: the record is still sealed without it,
+  # and this says so, rather than stopping a stand that wardryx can use.
+  wait_health keyryx-witness "$KEYRYX_WITNESS_PORT" "$!" \
+    || warn "keyryx witness did not come up; this run's record is not witnessed. See $LOGS_DIR/keyryx-witness.log."
+fi
+
+# --------------------------------------------------------------------------
 # Wardryx (optional): policy decision point with the seeded demo policy.
 # --------------------------------------------------------------------------
 
@@ -1921,6 +2062,11 @@ if [ "$WANT_POLICY" -eq 1 ]; then
   fi
 fi
 if [ "$WANT_POLICY" -eq 1 ]; then
+  # wardryx before v2.2.0 does not read WARDRYX_APPROVAL_SIGNER and would sign its
+  # approvals with a secret this run no longer sets, so it is refused here rather
+  # than started. scripts/keyryx-is-per-run.sh holds this check.
+  bin_reads_setting "$WARDRYX_BIN" WARDRYX_APPROVAL_SIGNER \
+    || die "$WARDRYX_BIN predates wardryx v2.2.0 and does not read WARDRYX_APPROVAL_SIGNER, so its approvals would not be signed by keyryx. Update the wardryx checkout ($WARDRYX_REPO) and run again with --force-install if another tool installed it."
   log "starting wardryx on :$WARDRYX_PORT (demo policy)"
   # The allow-list rehearsal rule for the mockryx drill: the one agent the drill
   # rehearses may call only lookup_order_status (@decided 2026-10-13). allow_tool is
@@ -1944,7 +2090,9 @@ YAML
   # key; the admin key is the operator's. With real keys set, wardryx answers no
   # devkey (WARDRYX_ALLOW_DEVKEY is not set here, and the variable is not used).
   WARDRYX_KEYS="$WARDRYX_PEP_KEY:default:pep,$WARDRYX_ADMIN_KEY:default:admin" \
-  WARDRYX_APPROVAL_SECRET="$WARDRYX_APPROVAL_SECRET" \
+  WARDRYX_APPROVAL_SIGNER=keyryx \
+  WARDRYX_KEYRYX_URL="http://127.0.0.1:$KEYRYX_PORT" \
+  WARDRYX_KEYRYX_CREDENTIAL_FILE="$KEYRYX_WARDRYX_KEY_PATH" \
   WARDRYX_POLICY_ARCHIVE="$EVENTS_DIR/wardryx-policy-archive" \
     "$WARDRYX_BIN" serve -addr "127.0.0.1:$WARDRYX_PORT" -events "$EVENTS_DIR/wardryx.ndjson" -policy "$POLICY_FILE" \
     > "$LOGS_DIR/wardryx.log" 2>&1 &
@@ -2746,6 +2894,8 @@ printf '  %-12s http://127.0.0.1:%s   %s\n' "gateway" "$GATEWAY_PORT" "Anthropic
 printf '  %-12s http://127.0.0.1:%s   %s\n' "cloud"   "$CLOUD_PORT"   "money-plane API (bearer: the cloud key below)"
 [ -n "$DASH_URL" ]                 && printf '  %-12s http://127.0.0.1:%s\n' "dashboard" "$DASH_PORT"
 [ "$WANT_POLICY" -eq 1 ]           && printf '  %-12s http://127.0.0.1:%s   %s\n' "wardryx" "$WARDRYX_PORT" "policy decision point"
+[ "$WANT_POLICY" -eq 1 ]           && printf '  %-12s http://127.0.0.1:%s   %s\n' "keyryx" "$KEYRYX_PORT" "key custody (wardryx's approval key)"
+[ "$WANT_POLICY" -eq 1 ]           && printf '  %-12s http://127.0.0.1:%s   %s\n' "keyryx-wit" "$KEYRYX_WITNESS_PORT" "witness of the record (reads, writes nothing)"
 [ "$WANT_IDENTITY" -eq 1 ]         && printf '  %-12s http://127.0.0.1:%s   %s\n' "idryx"   "$IDRYX_PORT"   "identity graph (/api/identities)"
 
 if [ "${#TOOLS_INSTALLED[@]}" -gt 0 ]; then

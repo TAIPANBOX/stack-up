@@ -35,7 +35,9 @@ Everything binds to `127.0.0.1` only.
 | tokenfuse-gateway | 4100 | Budget-enforcement proxy for the Anthropic Messages API (`/v1/messages`): point an agent's base URL here and every call is metered, and an over-budget one gets a hard 402. |
 | tokenfuse-cloud | 8080 | The money-plane control API (runs, budgets, savings, incidents). Started with one key minted for this run (see below). |
 | dashboard | 3000 | The money-plane dashboard, a static page served locally. This is the thing you actually look at. |
-| wardryx | 8090 | Policy decision point, seeded with a tiny demo policy scoped to fire-drill identities only. |
+| wardryx | 8090 | Policy decision point, seeded with a tiny demo policy scoped to fire-drill identities only. Its approvals are signed by keyryx (below). |
+| keyryx (custody) | 4340 | Holds the key wardryx signs approvals with, and publishes the keys a verifier needs. Started with the policy plane; see "Keyryx" below. |
+| keyryx (witness) | 4341 | Reads the event streams from its own process and records what it saw. It writes nothing to the streams. |
 | idryx | 8081 | Identity/access graph, built from the event stream. Its own default `:8080` collides with cloud, so stack-up runs it on `:8081`. |
 | heraldyx | none | The notifier. Reads the same event stream and decides which events are worth writing to a human about. Here it is pinned to file mode: it writes what it WOULD mail to `~/.stack-up/mail.txt` and opens no socket. `--no-notify` skips it. |
 | scopyx | 4300 | Governed web egress. Agents fetch **through** it, and wardryx decides every destination before anything leaves. `./up.sh` makes one call through it, to the cloud metadata address, which is refused on its address before a packet leaves the machine: read the refusal in `~/.stack-up/events/scopyx.ndjson` and the alert it raised in `~/.stack-up/mail.txt`. `--no-egress` skips it. |
@@ -791,6 +793,32 @@ are heuristics over ordinary text and their false positives are prose. The launc
 runs it in shadow so that a stand keeps a record of what passed through it, and it
 changes nothing else about a call.
 
+### Keyryx: custody of wardryx's approval key, and a witness of the record
+
+[keyryx](https://github.com/TAIPANBOX/keyryx) runs as two processes, started with the
+policy plane, so `--only money` leaves it out along with wardryx. **Custody** holds the key that signs an approval when a person grants one.
+wardryx v2.2.0 asks custody for that signature, so an approval can be checked
+against a published key rather than against a secret wardryx holds. The **witness**
+reads the event streams and the record from its own process, keeps its own log, and
+writes nothing to the streams. Its findings go to its own data directory for now, not
+to the shared bus, because heraldyx does not render keyryx's events yet.
+
+Everything is per run. The launcher gives custody and the witness separate data
+directories and separate root keys, all under `~/.stack-up/keyryx/`, and it writes
+each key to a file that only your user can read. No key value is printed, logged, or
+put on a command line; the summary names no key. A new run starts with new keys, so an
+approval granted in an earlier run does not verify in this one.
+
+keyryx is built from the commit that the tag `v0.1.0` names and nothing else. That tag
+publishes a container image, not a binary, and this launcher runs no containers, so
+the clone is refused unless it is that commit. The pin is two lines near the top of
+`up.sh` (`KEYRYX_TAG` and `KEYRYX_COMMIT`); moving it is one change.
+
+What this does not prove: that custody refuses a consumer it does not know, that the
+witness finds a real rewrite of a stream, and that the processes keep their keys from
+your own user. Those are keyryx's own tests. Custody and the witness run as one OS
+user here, so they are separated by process and directory, not by user ID.
+
 ## Options
 
 ```
@@ -1003,6 +1031,8 @@ Everything that is only stack-up's business stays under `~/.stack-up/`
   logs/        one log file per service
   pids/        recorded PIDs, used by down.sh
   gateway-admin.key  the gateway's admin key for this run (mode 0600)
+  keyryx/      custody's and the witness's data and root keys, rebuilt each run
+               (key files mode 0600; see "Keyryx" above)
   typryx/      ledger only, only with --with-typed (its journal is now in
                events/typryx.ndjson above; see "Typed answers" above)
   routines/    routines.sh's own state: history, the latest record per routine,

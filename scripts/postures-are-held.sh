@@ -33,6 +33,9 @@
 #    is not assigned anywhere.
 # 7. wardryx's WARDRYX_KEYS names the gateway's wardryx key as role pep, so the
 #    key the gateway presents is the one wardryx answers to.
+# 8. The client secret never reaches a command line: no line outside a comment
+#    names it in a curl call or in an -H argument, and none puts it in an
+#    x-fuse-key header value. It is sent on stdin (curl -H @-).
 #
 # WHAT IT DOES NOT HOLD
 #
@@ -242,6 +245,13 @@ elif [ -z "$PEP_VAR" ] || ! grep -qE "WARDRYX_KEYS=\"\\\$\\{?${PEP_VAR}\\}?:[^:\
   printf 'up.sh: WARDRYX_KEYS does not name the gateway'"'"'s wardryx key as role pep (%s).\n' "$keys_line" >&2
   problems=$(( problems + 1 ))
 fi
+
+# 8. The client secret on a command line: an argument of curl, an -H argument, or an
+#    x-fuse-key header value. ps can read any of them.
+while IFS= read -r hit; do
+  printf 'up.sh:%s: puts the client key on a command line (%s), where ps can read it. Send the header on stdin (curl -H @-).\n' "${hit%%:*}" "${hit#*:}" >&2
+  problems=$(( problems + 1 ))
+done < <(live | grep -E 'curl.*GATEWAY_CLIENT_(SECRET|KEYS)|-H.*GATEWAY_CLIENT_(SECRET|KEYS)|x-fuse-key: \$' || true)
 
 if [ "$problems" -gt 0 ]; then
   fail "$problems problem(s). See CLAUDE.md, invariant 22."

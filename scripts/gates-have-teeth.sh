@@ -1431,6 +1431,15 @@ assert os.path.exists("up.sh"), "expected up.sh"
 subprocess.run(["git", "mv", "up.sh", "up.bash"], check=True)')" \
 	"measured nothing"
 
+run_case "postures-are-held: the client key is on a curl command line" fail \
+	'./scripts/postures-are-held.sh' \
+	"$(py 'edit("up.sh", "      -H @- \\\n", "      -H \"x-fuse-key: $GATEWAY_CLIENT_SECRET\" \\\n")')" \
+	"puts the client key on a command line"
+
+run_case "postures-are-held: a comment that names the client key is not a fault" pass \
+	'./scripts/postures-are-held.sh' \
+	"$(py 'edit("up.sh", "# printf is a shell builtin, so the secret is on no argv.", "# printf is a shell builtin, so the secret is on no argv.\n# curl -H \"x-fuse-key: $GATEWAY_CLIENT_SECRET\" would put it on an argv.")')"
+
 echo
 if [ -n "$(git status --porcelain)" ]; then
 	printf 'FAIL: this script left the tree dirty, so it cannot be trusted about anything above\n'

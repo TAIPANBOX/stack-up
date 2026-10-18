@@ -1015,14 +1015,16 @@ demo_traffic() {
   local i allowed=0 refused=0 code
   run="stackup-demo-$(rand_hex 4)"
 
+  # The client secret reaches curl on stdin (-H @-), never on its command line,
+  # where ps can read it. printf is a shell builtin, so the secret is on no argv.
   for i in 1 2 3 4 5 6; do
-    code="$(curl -s -o /dev/null -w '%{http_code}' -m 5 \
+    code="$(printf 'x-fuse-key: %s\n' "$GATEWAY_CLIENT_SECRET" | curl -s -o /dev/null -w '%{http_code}' -m 5 \
       -X POST "http://127.0.0.1:$GATEWAY_PORT/v1/messages" \
       -H "content-type: application/json" \
       -H "x-fuse-run-id: $run" \
       -H "x-fuse-budget-usd: $cap" \
       -H "x-fuse-agent-id: $agent" \
-      -H "x-fuse-key: $GATEWAY_CLIENT_SECRET" \
+      -H @- \
       -d '{"model":"claude-3-5-sonnet-20241022","max_tokens":64,"messages":[{"role":"user","content":"stack-up demonstration call"}]}' \
       2>/dev/null || echo "000")"
     case "$code" in

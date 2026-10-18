@@ -56,6 +56,13 @@ Feature: the gateway and the MCP broker hold the postures they set, from values 
     Then postures-are-held.sh still passes
     # -> gates-have-teeth.sh "postures-are-held: a comment that names devkey is not a fault"
 
+  Scenario: the client key never reaches a command line, where ps can read it
+    Given the demo's calls to the gateway in up.sh
+    When a live line puts the client key in a curl argument or an x-fuse-key header value
+    Then postures-are-held.sh fails
+    # -> gates-have-teeth.sh "postures-are-held: the client key is on a curl command line"
+    # -> gates-have-teeth.sh "postures-are-held: a comment that names the client key is not a fault"
+
   Scenario: the gate says it measured nothing when its subject is gone
     Given the gate reads every gateway start and the launcher itself
     When no gateway start is left to judge, or up.sh is gone

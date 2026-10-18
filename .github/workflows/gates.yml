@@ -48,6 +48,9 @@ jobs:
       - name: the gateway and the broker hold their postures, from values minted for the run, and wardryx answers only the pep key
         run: ./scripts/postures-are-held.sh
 
+      - name: keyryx's custody and witness run per run from separate keys, and wardryx signs its approvals through custody
+        run: ./scripts/keyryx-is-per-run.sh
+
       - name: the gateway fails closed on wardryx, and the launcher stops when wardryx does not come up
         run: ./scripts/wardryx-fails-closed.sh
 

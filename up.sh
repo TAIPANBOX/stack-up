@@ -1015,13 +1015,16 @@ demo_traffic() {
   local i allowed=0 refused=0 code
   run="stackup-demo-$(rand_hex 4)"
 
+  # The client secret reaches curl on stdin (-H @-), never on its command line,
+  # where ps can read it. printf is a shell builtin, so the secret is on no argv.
   for i in 1 2 3 4 5 6; do
-    code="$(curl -s -o /dev/null -w '%{http_code}' -m 5 \
+    code="$(printf 'x-fuse-key: %s\n' "$GATEWAY_CLIENT_SECRET" | curl -s -o /dev/null -w '%{http_code}' -m 5 \
       -X POST "http://127.0.0.1:$GATEWAY_PORT/v1/messages" \
       -H "content-type: application/json" \
       -H "x-fuse-run-id: $run" \
       -H "x-fuse-budget-usd: $cap" \
       -H "x-fuse-agent-id: $agent" \
+      -H @- \
       -d '{"model":"claude-3-5-sonnet-20241022","max_tokens":64,"messages":[{"role":"user","content":"stack-up demonstration call"}]}' \
       2>/dev/null || echo "000")"
     case "$code" in
@@ -1683,6 +1686,43 @@ if ! ( umask 077; printf '%s\n' "$GATEWAY_ADMIN_KEY" > "$GATEWAY_ADMIN_KEY_FILE"
   die "could not write $GATEWAY_ADMIN_KEY_FILE; refusing to start a gateway whose admin key nobody could read."
 fi
 
+# The gateway's client keys: who may send it a call. With TOKENFUSE_CLIENT_KEYS
+# unset, tokenfuse admits every caller, so the metered door would take a call from
+# any process on this machine. The spec is "secret:key_id" (tokenfuse's
+# clientkeys.rs). The secret is minted for this run and the key id is this demo's.
+# The spec is one minted value, so the refusal below covers all of it. The demo's
+# own calls present the secret as x-fuse-key, and the secret goes to a 0600 file
+# the summary names. scripts/postures-are-held.sh holds every half of this.
+GATEWAY_CLIENT_KEYS="$(rand_hex 24):stack-up-demo"
+[ -n "$GATEWAY_CLIENT_KEYS" ] \
+  || die "could not mint the gateway's client keys (no openssl, and /dev/urandom gave nothing); refusing to start a gateway that would admit every caller."
+GATEWAY_CLIENT_SECRET="${GATEWAY_CLIENT_KEYS%%:*}"
+GATEWAY_CLIENT_KEY_FILE="$STACK_UP_HOME/gateway-client.key"
+rm -f "$GATEWAY_CLIENT_KEY_FILE"
+if ! ( umask 077; printf '%s\n' "$GATEWAY_CLIENT_SECRET" > "$GATEWAY_CLIENT_KEY_FILE" ) \
+   || ! chmod 600 "$GATEWAY_CLIENT_KEY_FILE"; then
+  die "could not write $GATEWAY_CLIENT_KEY_FILE; refusing to start a gateway whose client key nobody could read."
+fi
+
+# wardryx's keys for this run. The gateway, the MCP broker and scopyx are
+# enforcement points: each asks wardryx for decisions, and wardryx answers an
+# enforcement point only in the pep role. The built-in devkey literal is public in
+# this repository and is an admin on wardryx whenever no real key is set, so it is
+# no longer handed to anything, and WARDRYX_ALLOW_DEVKEY is not set. The admin key
+# is for the operator's policy changes, so it goes to a 0600 file, not the terminal.
+WARDRYX_PEP_KEY="$(rand_hex 24)"
+[ -n "$WARDRYX_PEP_KEY" ] \
+  || die "could not mint wardryx's enforcement-point key (no openssl, and /dev/urandom gave nothing); refusing to start a policy plane that nothing could call."
+WARDRYX_ADMIN_KEY="$(rand_hex 24)"
+[ -n "$WARDRYX_ADMIN_KEY" ] \
+  || die "could not mint wardryx's admin key (no openssl, and /dev/urandom gave nothing); refusing to start a policy plane that anybody could change."
+WARDRYX_ADMIN_KEY_FILE="$STACK_UP_HOME/wardryx-admin.key"
+rm -f "$WARDRYX_ADMIN_KEY_FILE"
+if ! ( umask 077; printf '%s\n' "$WARDRYX_ADMIN_KEY" > "$WARDRYX_ADMIN_KEY_FILE" ) \
+   || ! chmod 600 "$WARDRYX_ADMIN_KEY_FILE"; then
+  die "could not write $WARDRYX_ADMIN_KEY_FILE; refusing to start a policy plane whose admin key nobody could read."
+fi
+
 # The cloud's key for this run: ONE key, used everywhere this launcher talks to
 # the cloud. The cloud is started with it as TOKENFUSE_CLOUD_KEYS
 # "<key>:default:admin" (the same org, role and no-site the old fallback had),
@@ -1737,13 +1777,16 @@ if [ -n "$WARDRYX_URL" ]; then
   # defaults to shadow mode, which takes one global mutex per call and walks
   # up to 10,000 cached entries computing cosine similarity, serving nothing.
   # tokenfuse#319.
-  # TOKENFUSE_DECLASSIFY_KEY, TOKENFUSE_ADMIN_KEYS and TOKENFUSE_CLOUD_KEY are
-  # prefix assignments BEFORE `env`, not arguments to it: env would put the value
-  # on its own command line for the moment before it execs the gateway, where
-  # `ps` can read it. A prefix assignment lands in the environment of the process only.
+  # TOKENFUSE_DECLASSIFY_KEY, TOKENFUSE_ADMIN_KEYS, TOKENFUSE_CLOUD_KEY,
+  # TOKENFUSE_CLIENT_KEYS and TOKENFUSE_WARDRYX_KEY are prefix assignments BEFORE
+  # `env`, not arguments to it: env would put the value on its own command line
+  # for the moment before it execs the gateway, where `ps` can read it. A prefix
+  # assignment lands in the environment of the process only.
   TOKENFUSE_CLOUD_KEY="$CLOUD_KEY" \
   TOKENFUSE_DECLASSIFY_KEY="$GATEWAY_DECLASSIFY_KEY" \
   TOKENFUSE_ADMIN_KEYS="$GATEWAY_ADMIN_KEY" \
+  TOKENFUSE_CLIENT_KEYS="$GATEWAY_CLIENT_KEYS" \
+  TOKENFUSE_WARDRYX_KEY="$WARDRYX_PEP_KEY" \
   env ${DELEG_ENV[@]+"${DELEG_ENV[@]}"} \
   TOKENFUSE_ADDR="127.0.0.1:$GATEWAY_PORT" \
   TOKENFUSE_MAX_RUN_BUDGET_USD="$RUN_BUDGET_CEILING_USD" \
@@ -1751,6 +1794,7 @@ if [ -n "$WARDRYX_URL" ]; then
   TOKENFUSE_DLP_PII="$PII_MODE" \
   TOKENFUSE_ALLOW_STUB="1" \
   TOKENFUSE_MODE="enforce" \
+  TOKENFUSE_IDENTITY_STRICT="enforce" \
   TOKENFUSE_CACHE="off" \
   TOKENFUSE_EVENTS_PATH="$EVENTS_FILE" \
   TOKENFUSE_DATA_DIR="$STACK_UP_HOME/traces/gateway" \
@@ -1758,7 +1802,6 @@ if [ -n "$WARDRYX_URL" ]; then
   TOKENFUSE_WARDRYX_MODE="enforce" \
   TOKENFUSE_WARDRYX_FAILMODE="closed" \
   TOKENFUSE_WARDRYX_URL="$WARDRYX_URL" \
-  TOKENFUSE_WARDRYX_KEY="devkey" \
   TOKENFUSE_WARDRYX_TIMEOUT_MS="2000" \
     "$GATEWAY_BIN" > "$LOGS_DIR/gateway.log" 2>&1 &
 else
@@ -1771,13 +1814,15 @@ else
   # defaults to shadow mode, which takes one global mutex per call and walks
   # up to 10,000 cached entries computing cosine similarity, serving nothing.
   # tokenfuse#319.
-  # TOKENFUSE_DECLASSIFY_KEY, TOKENFUSE_ADMIN_KEYS and TOKENFUSE_CLOUD_KEY are
-  # prefix assignments BEFORE `env`, not arguments to it: env would put the value
-  # on its own command line for the moment before it execs the gateway, where
-  # `ps` can read it. A prefix assignment lands in the environment of the process only.
+  # TOKENFUSE_DECLASSIFY_KEY, TOKENFUSE_ADMIN_KEYS and TOKENFUSE_CLIENT_KEYS are
+  # prefix assignments BEFORE `env`, not arguments to it, and so is TOKENFUSE_CLOUD_KEY:
+  # env would put the value on its own command line for the moment before it execs
+  # the gateway, where `ps` can read it. A prefix assignment lands in the environment
+  # of the process only.
   TOKENFUSE_CLOUD_KEY="$CLOUD_KEY" \
   TOKENFUSE_DECLASSIFY_KEY="$GATEWAY_DECLASSIFY_KEY" \
   TOKENFUSE_ADMIN_KEYS="$GATEWAY_ADMIN_KEY" \
+  TOKENFUSE_CLIENT_KEYS="$GATEWAY_CLIENT_KEYS" \
   env ${DELEG_ENV[@]+"${DELEG_ENV[@]}"} \
   TOKENFUSE_ADDR="127.0.0.1:$GATEWAY_PORT" \
   TOKENFUSE_MAX_RUN_BUDGET_USD="$RUN_BUDGET_CEILING_USD" \
@@ -1785,6 +1830,7 @@ else
   TOKENFUSE_DLP_PII="$PII_MODE" \
   TOKENFUSE_ALLOW_STUB="1" \
   TOKENFUSE_MODE="enforce" \
+  TOKENFUSE_IDENTITY_STRICT="enforce" \
   TOKENFUSE_CACHE="off" \
   TOKENFUSE_EVENTS_PATH="$EVENTS_FILE" \
   TOKENFUSE_DATA_DIR="$STACK_UP_HOME/traces/gateway" \
@@ -1893,12 +1939,11 @@ YAML
   else
     warn "$WARDRYX_BIN predates wardryx v1.3.0 and does not read allow_tool, so the mockryx-allow-list rehearsal rule is not seeded. Update the wardryx checkout ($WARDRYX_REPO) so the next run rebuilds it."
   fi
-  # WARDRYX_ALLOW_DEVKEY: loopback dev run, the literal bearer devkey below;
-  # harmless on a wardryx that does not read this variable yet, and needed
-  # once it does (a future wardryx refuses to start with WARDRYX_KEYS empty
-  # unless this opt-in is set).
-  WARDRYX_KEYS="" \
-  WARDRYX_ALLOW_DEVKEY="1" \
+  # WARDRYX_KEYS names this run's two keys in wardryx's own "key:org:role" form.
+  # The gateway, the MCP broker and scopyx are enforcement points and hold the pep
+  # key; the admin key is the operator's. With real keys set, wardryx answers no
+  # devkey (WARDRYX_ALLOW_DEVKEY is not set here, and the variable is not used).
+  WARDRYX_KEYS="$WARDRYX_PEP_KEY:default:pep,$WARDRYX_ADMIN_KEY:default:admin" \
   WARDRYX_APPROVAL_SECRET="$WARDRYX_APPROVAL_SECRET" \
   WARDRYX_POLICY_ARCHIVE="$EVENTS_DIR/wardryx-policy-archive" \
     "$WARDRYX_BIN" serve -addr "127.0.0.1:$WARDRYX_PORT" -events "$EVENTS_DIR/wardryx.ndjson" -policy "$POLICY_FILE" \
@@ -2057,12 +2102,11 @@ if [ "$WANT_EGRESS" -eq 1 ]; then
   # no volume boundary on this launcher, so the separation is by filename, and
   # heraldyx reads the directory rather than any one file, which is why the
   # alert below arrives at all.
-  # SCOPYX_WARDRYX_KEY is "devkey", the same placeholder the gateway uses on
-  # line 802, and for the same reason: wardryx on this launcher runs with
-  # WARDRYX_KEYS="" and therefore authenticates nobody. The value documents the
-  # SHAPE, so a reader moving to stack-single or stack-k8s knows a real
-  # credential goes here. A literal rather than ${WARDRYX_KEY:-}, which is a
-  # reference to nothing and would read as though it resolved.
+  # SCOPYX_WARDRYX_KEY is this run's enforcement-point key, WARDRYX_PEP_KEY, the
+  # one the gateway and the MCP broker present to wardryx too. scopyx asks wardryx
+  # for every egress decision, and wardryx answers a key only in the role WARDRYX_KEYS
+  # gives it, which is pep. A variable rather than a literal, so the value is minted
+  # for this run and never sits in this file.
   #
   # EVERY COMMENT ABOUT THIS BLOCK LIVES ABOVE IT, and that is not style. A
   # comment after a `\` ENDS the line continuation, so the assignments before it
@@ -2074,7 +2118,7 @@ if [ "$WANT_EGRESS" -eq 1 ]; then
   SCOPYX_ADDR="127.0.0.1:$SCOPYX_PORT" \
   SCOPYX_KEYS="$SCOPYX_SECRET=$SCOPYX_AGENT" \
   SCOPYX_WARDRYX="http://127.0.0.1:$WARDRYX_PORT" \
-  SCOPYX_WARDRYX_KEY="devkey" \
+  SCOPYX_WARDRYX_KEY="$WARDRYX_PEP_KEY" \
   SCOPYX_EVENTS="$EVENTS_DIR/scopyx.ndjson" \
   SCOPYX_MAX_FETCHES_PER_HOUR=50 \
     "$SCOPYX_BIN" > "$LOGS_DIR/scopyx.log" 2>&1 &
@@ -2372,11 +2416,14 @@ if [ "$TYPED_RISK_SIGNAL" -eq 1 ]; then
   # so a hold_if_signal hold refuses the call instead of annotating it; with no
   # such rule and no policy matching the broker's agent, every call is allowed
   # as before. enforce also means a call with no x-fuse-agent-id is refused 400
-  # identity_required, which the example this run prints already carries.
+  # identity_required, which the example this run prints already carries. The
+  # fail mode is closed, as on the gateway: a call wardryx cannot answer is refused,
+  # not allowed. The key is this run's enforcement-point key, as the gateway's is.
   BROKER_WARDRYX_ENV=(
     "TOKENFUSE_WARDRYX_MODE=enforce"
     "TOKENFUSE_WARDRYX_URL=http://127.0.0.1:$TYPRYX_PROXY_PORT"
-    "TOKENFUSE_WARDRYX_KEY=devkey"
+    "TOKENFUSE_WARDRYX_KEY=$WARDRYX_PEP_KEY"
+    "TOKENFUSE_WARDRYX_FAILMODE=closed"
     "TOKENFUSE_WARDRYX_TIMEOUT_MS=2000"
     "TOKENFUSE_MCP_WARDRYX_TIMEOUT_MS=$RISK_DECIDE_TIMEOUT_MS"
   )
@@ -2385,6 +2432,10 @@ fi
 if [ "$WITH_TYPED" -eq 1 ]; then
   BROKER_SECRET="$( set +o pipefail; LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 40 )"
   log "starting tokenfuse-mcp-broker on :$BROKER_PORT (fronting typryx on :$TYPRYX_PORT)"
+  # DLP and the tool scan BLOCK: a secret in a tool's arguments is refused, and a
+  # tool whose description reads as poisoned is not offered. Both are literals here,
+  # so a caller cannot change them. They were shadow and warn before this, and no
+  # run has yet shown whether the scan refuses one of typryx's own tools.
   # env ${BROKER_WARDRYX_ENV[@]+...} on its own line, the way the gateway's
   # starts carry DELEG_ENV: the secrets above it stay prefix assignments (never
   # an argument to env), and the launch line stays `"$GATEWAY_BIN" mcp-broker`
@@ -2397,6 +2448,8 @@ if [ "$WITH_TYPED" -eq 1 ]; then
   TOKENFUSE_MCP_SECRET_SCOPES="typryx_key=tools:ask|ask_freeform|list_questions" \
   TOKENFUSE_EVENTS_PATH="$EVENTS_DIR/tokenfuse-mcp.ndjson" \
   TOKENFUSE_MCP_DLP_PII="$PII_MODE" \
+  TOKENFUSE_MCP_DLP="block" \
+  TOKENFUSE_MCP_SCAN="block" \
   env ${BROKER_WARDRYX_ENV[@]+"${BROKER_WARDRYX_ENV[@]}"} \
     "$GATEWAY_BIN" mcp-broker > "$LOGS_DIR/tokenfuse-mcp-broker.log" 2>&1 &
   register tokenfuse-mcp-broker "$!" TERM
@@ -2745,6 +2798,9 @@ log "         it is in $GATEWAY_ADMIN_KEY_FILE (mode 0600, minted fresh this run
 # shellcheck disable=SC2016
 # The $(cat ...) is text for the operator to run, not an expansion here.
 printf '  curl -H "Authorization: Bearer $(cat %s)" http://127.0.0.1:%s/v1/runs\n' "$GATEWAY_ADMIN_KEY_FILE" "$GATEWAY_PORT"
+log "client:  the gateway admits only a call that carries this run's client key as x-fuse-key (the demo's own calls do)"
+log "         it is in $GATEWAY_CLIENT_KEY_FILE (mode 0600, minted fresh this run, not printed here)"
+log "wardryx: the policy plane answers the gateway, the MCP broker and scopyx with this run's enforcement-point key; the admin key that changes policies is in $WARDRYX_ADMIN_KEY_FILE (mode 0600, not printed here)"
 if [ "$WITH_DELEGATION" -eq 1 ]; then
   log "revoke:  POST http://127.0.0.1:$VOUCHRYX_PORT/v1/revoke   (bearer: key in $DELEG_DIR/revoke.key)"
   log "         survives a restart: ./down.sh then ./up.sh keeps every revocation in force"

@@ -34,6 +34,7 @@ bash -n up.sh && bash -n down.sh && bash -n routines.sh
 ./scripts/declassify-is-keyed.sh
 ./scripts/cloud-key-is-per-run.sh
 ./scripts/admin-keys-are-per-run.sh
+./scripts/postures-are-held.sh
 ./scripts/wardryx-fails-closed.sh
 ./scripts/firewall-is-enforce.sh
 ./scripts/pii-is-shadow.sh
@@ -538,6 +539,31 @@ building here and the thing that most often gets skipped.
     6 scenarios. Not covered: a running gateway refusing a call with no key, which needs a built gateway; that the
     value is private inside a process environment (`/proc/<pid>/environ`, `ps eww`); and the `mcp-broker`
     subcommand, which is not given the key and whose own routes were not checked.)*
+
+22. **The gateway and the MCP broker hold the postures they set, from values minted for this run.**
+    `@decided 2026-10-18` (paraphrased, from the estate's posture review of 2026-10-17): the gateway
+    admits only a caller that presents a client key, the gateway and the broker present an
+    enforcement-point key to wardryx and never the built-in devkey, identity is enforced, and the
+    broker blocks secrets in tool arguments and poisoned tools and refuses when wardryx cannot answer.
+    `up.sh` mints `GATEWAY_CLIENT_KEYS` (`secret:key_id`, `rand_hex 24` above the first gateway start,
+    refused when empty) and `WARDRYX_PEP_KEY` (refused when empty), gives each to every gateway start
+    as a prefix assignment ahead of `env`, sets `TOKENFUSE_IDENTITY_STRICT="enforce"` on both starts,
+    sets `TOKENFUSE_MCP_DLP` and `TOKENFUSE_MCP_SCAN` to `block` and `TOKENFUSE_WARDRYX_FAILMODE=closed`
+    on the broker, and starts wardryx with `WARDRYX_KEYS` naming the pep key as role `pep`, with no
+    `WARDRYX_ALLOW_DEVKEY`. The demo's own calls send the client secret as `x-fuse-key` on stdin (`curl -H @-`), never on a command line. The client
+    secret and wardryx's admin key each go to a 0600 file, never to the terminal.
+    `@claude 2026-10-18`: the key id, the file names and the explicit identity setting are my choices.
+    tokenfuse's own default for identity strict is already enforce (read in `identitymap.rs` at
+    origin/main, not run), so the setting here names what the default already does.
+    *(gate: `scripts/postures-are-held.sh`: every gateway start takes `TOKENFUSE_CLIENT_KEYS` from one
+    minted and refused run variable ahead of env, sets identity strict to enforce, and takes any
+    wardryx key from a minted and refused variable; the broker start sets DLP and scan to block, and its
+    wardryx array sets the closed fail mode and a minted key; no devkey literal and no
+    `WARDRYX_ALLOW_DEVKEY=` outside a comment; no client key on a curl command line; wardryx's key list
+    names the pep key as pep. 15 fault cases and 2 pass cases in `gates-have-teeth.sh`;
+    `features/the-launcher-holds-its-postures.feature`, 9 scenarios. Not covered: a running gateway refusing a call with no key, a running wardryx refusing
+    a viewer, and the broker's DLP and scan refusing a secret or a poisoned tool; these need built
+    binaries. The broker's block settings were not run against typryx's own tool descriptions.)*
 
 An approved architecture decision is **not finished** until it is two things: a
 numbered invariant in this file, and a gate in a script if it can be checked

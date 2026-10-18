@@ -468,7 +468,7 @@ demo agent:
 
 ```sh
 curl -X PUT http://127.0.0.1:8090/v1/policies/risk-hold \
-  -H "Authorization: Bearer devkey" -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $(cat ~/.stack-up/wardryx-admin.key)" -H "Content-Type: application/json" \
   -d '{"target":"agent://demo.local/*","hold_if_signal":{"name":"action.risk_class","values":["destructive","external_send","financial"],"min_probability":0.8}}'
 ```
 
@@ -564,7 +564,8 @@ modifies them). Otherwise it shallow-clones what it needs into `~/.stack-up/`.
 The money plane has two independent faces, and stack-up runs both:
 
 - The **gateway** (`:4100`) is the live enforcement proxy. Point an Anthropic
-  Messages API client at it (`POST /v1/messages`) and every call is metered
+  Messages API client at it (`POST /v1/messages`, sending `x-fuse-key` with the
+  value in `~/.stack-up/gateway-client.key`) and every call is metered
   against a per-run budget, with a hard 402 when it is spent. Its own view is
   `GET :4100/v1/runs`, which needs this run's admin key (see "This is a sandbox,
   not a deployment").
@@ -616,9 +617,10 @@ curl -X POST http://127.0.0.1:8080/v1/ingest \
 
 Refresh the dashboard and your run is there. To exercise the gateway's live
 enforcement instead, send Anthropic Messages API traffic to `:4100` with an
-`x-fuse-run-id` and `x-fuse-budget-usd` and watch it 402 when the budget runs
-out (see the [tokenfuse README](https://github.com/TAIPANBOX/tokenfuse) for
-wiring a real upstream).
+`x-fuse-key` (the value in `~/.stack-up/gateway-client.key`), an `x-fuse-run-id`
+and an `x-fuse-budget-usd`, and watch it 402 when the budget runs out (see the
+[tokenfuse README](https://github.com/TAIPANBOX/tokenfuse) for wiring a real
+upstream).
 
 ## The record plane
 
@@ -934,8 +936,21 @@ line up numerically - that is expected, not a bug.
 - The literal bearer `devkey` no longer opens the cloud. It used to, through
   `TOKENFUSE_CLOUD_ALLOW_DEVKEY=1` and an empty key set; tokenfuse removed that
   fallback (tokenfuse#380), and a cloud started with that variable now refuses
-  to start. wardryx on this launcher still runs in its own dev-key mode
-  (`WARDRYX_ALLOW_DEVKEY=1`, loopback only), which is a separate setting.
+  to start. wardryx no longer runs in its dev-key mode either: this launcher gives
+  it one key per run for the enforcement points (the gateway, the MCP broker and
+  scopyx), in the pep role, and one admin key for the operator, in
+  `~/.stack-up/wardryx-admin.key` (mode 0600). The devkey literal is not used.
+- The gateway admits only a caller that presents this run's client key as
+  `x-fuse-key`. The demo's own calls present it, and the key is in
+  `~/.stack-up/gateway-client.key` (mode 0600), named in the summary and never
+  printed. A call without it is refused with 401. The opt-in `mockryx-drill` sends
+  no client key (its tool does not take one yet), so the keyed gateway refuses it
+  until it does.
+- The MCP broker (`--with-typed`) blocks a secret carried in a tool's arguments
+  and a tool whose description reads as poisoned, and refuses a call when wardryx
+  cannot answer. These are fixed settings, not switches: the broker's own tests
+  show them working, and this launcher has not yet run a call through typryx's
+  tools with them on.
 - The gateway's admin routes (`GET /v1/runs`, `POST /v1/runs/{id}/kill`,
   `GET /v1/keys`, `GET /v1/policy-plane`, `GET /v1/agent-ids`) need this run's
   admin key. The key is written to `~/.stack-up/gateway-admin.key` (mode 0600),

@@ -238,7 +238,8 @@ run_case "declassify-is-keyed: the key becomes a literal" fail \
 # prefix assignment ahead of env is not.
 run_case "declassify-is-keyed: the key becomes an argument to env" fail \
 	'./scripts/declassify-is-keyed.sh' \
-	"$(py 'edit("up.sh", "  TOKENFUSE_DECLASSIFY_KEY=\"$GATEWAY_DECLASSIFY_KEY\" \\\n  TOKENFUSE_ADMIN_KEYS=\"$GATEWAY_ADMIN_KEY\" \\\n  env ${DELEG_ENV[@]+\"${DELEG_ENV[@]}\"} \\\n", "  TOKENFUSE_ADMIN_KEYS=\"$GATEWAY_ADMIN_KEY\" \\\n  env ${DELEG_ENV[@]+\"${DELEG_ENV[@]}\"} \\\n  TOKENFUSE_DECLASSIFY_KEY=\"$GATEWAY_DECLASSIFY_KEY\" \\\n")')" \
+	"$(py 'edit("up.sh", "  TOKENFUSE_DECLASSIFY_KEY=\"$GATEWAY_DECLASSIFY_KEY\" \\\n", "")
+edit("up.sh", "  env ${DELEG_ENV[@]+\"${DELEG_ENV[@]}\"} \\\n", "  env ${DELEG_ENV[@]+\"${DELEG_ENV[@]}\"} \\\n  TOKENFUSE_DECLASSIFY_KEY=\"$GATEWAY_DECLASSIFY_KEY\" \\\n")')" \
 	"is an argument to env"
 
 # Minted, but not fresh: one key for every run is a published key.
@@ -694,7 +695,8 @@ run_case "cloud-key-is-per-run: a gateway reports to the cloud with the old lite
 
 run_case "cloud-key-is-per-run: the gateway's cloud key is an argument to env" fail \
 	'./scripts/cloud-key-is-per-run.sh' \
-	"$(py 'edit("up.sh", "  TOKENFUSE_CLOUD_KEY=\"$CLOUD_KEY\" \\\n  TOKENFUSE_DECLASSIFY_KEY=\"$GATEWAY_DECLASSIFY_KEY\" \\\n  TOKENFUSE_ADMIN_KEYS=\"$GATEWAY_ADMIN_KEY\" \\\n  env ", "  TOKENFUSE_DECLASSIFY_KEY=\"$GATEWAY_DECLASSIFY_KEY\" \\\n  TOKENFUSE_ADMIN_KEYS=\"$GATEWAY_ADMIN_KEY\" \\\n  env \\\n  TOKENFUSE_CLOUD_KEY=\"$CLOUD_KEY\" \\\n  ")')" \
+	"$(py 'edit("up.sh", "  TOKENFUSE_CLOUD_KEY=\"$CLOUD_KEY\" \\\n", "")
+edit("up.sh", "  env ${DELEG_ENV[@]+\"${DELEG_ENV[@]}\"} \\\n", "  env ${DELEG_ENV[@]+\"${DELEG_ENV[@]}\"} \\\n  TOKENFUSE_CLOUD_KEY=\"$CLOUD_KEY\" \\\n")')" \
 	"TOKENFUSE_CLOUD_KEY is an argument to env"
 
 run_case "cloud-key-is-per-run: the demo seed posts with the old literal" fail \
@@ -918,7 +920,7 @@ run_case "declassify-is-keyed: the comment above the mint is reworded" pass \
 # trailing comment that happens to say the same word, would be excused by it.
 run_case "gateway-decides-its-upstream: a stray mention of mcp-broker does not excuse a real gateway start" fail \
 	'./scripts/gateway-decides-its-upstream.sh' \
-	"$(py 'edit("up.sh", "TOKENFUSE_ALLOW_STUB=\"1\" \\\n  TOKENFUSE_MODE=\"enforce\" \\\n  TOKENFUSE_CACHE=\"off\" \\\n  TOKENFUSE_EVENTS_PATH=\"$EVENTS_FILE\" \\\n  TOKENFUSE_DATA_DIR=\"$STACK_UP_HOME/traces/gateway\" \\\n  TOKENFUSE_CLOUD_URL=\"http://127.0.0.1:$CLOUD_PORT\" \\\n    \"$GATEWAY_BIN\" > \"$LOGS_DIR/gateway.log\" 2>&1 &\nfi", "TOKENFUSE_MODE=\"enforce\" \\\n  TOKENFUSE_CACHE=\"off\" \\\n  TOKENFUSE_EVENTS_PATH=\"$EVENTS_FILE\" \\\n  TOKENFUSE_DATA_DIR=\"$STACK_UP_HOME/traces/gateway\" \\\n  TOKENFUSE_CLOUD_URL=\"http://127.0.0.1:$CLOUD_PORT\" \\\n    \"$GATEWAY_BIN\" > \"$LOGS_DIR/gateway.log\" 2>&1 &  # not mcp-broker\nfi")')" \
+	"$(py 'edit("up.sh", "TOKENFUSE_ALLOW_STUB=\"1\" \\\n  TOKENFUSE_MODE=\"enforce\" \\\n  TOKENFUSE_IDENTITY_STRICT=\"enforce\" \\\n  TOKENFUSE_CACHE=\"off\" \\\n  TOKENFUSE_EVENTS_PATH=\"$EVENTS_FILE\" \\\n  TOKENFUSE_DATA_DIR=\"$STACK_UP_HOME/traces/gateway\" \\\n  TOKENFUSE_CLOUD_URL=\"http://127.0.0.1:$CLOUD_PORT\" \\\n    \"$GATEWAY_BIN\" > \"$LOGS_DIR/gateway.log\" 2>&1 &\nfi", "TOKENFUSE_MODE=\"enforce\" \\\n  TOKENFUSE_IDENTITY_STRICT=\"enforce\" \\\n  TOKENFUSE_CACHE=\"off\" \\\n  TOKENFUSE_EVENTS_PATH=\"$EVENTS_FILE\" \\\n  TOKENFUSE_DATA_DIR=\"$STACK_UP_HOME/traces/gateway\" \\\n  TOKENFUSE_CLOUD_URL=\"http://127.0.0.1:$CLOUD_PORT\" \\\n    \"$GATEWAY_BIN\" > \"$LOGS_DIR/gateway.log\" 2>&1 &  # not mcp-broker\nfi")')" \
 	"neither TOKENFUSE_UPSTREAM nor TOKENFUSE_ALLOW_STUB"
 
 # up.sh reads the domain from the environment and routines.sh from a file.
@@ -1347,6 +1349,87 @@ open("up.sh", "w").write(s)')" \
 run_case "admin-keys-are-per-run: a comment that names the key variable is not a print" pass \
 	'./scripts/admin-keys-are-per-run.sh' \
 	"$(py 'edit("up.sh", "# scripts/declassify-is-keyed.sh holds both halves.", "# scripts/declassify-is-keyed.sh holds both halves.\n# GATEWAY_ADMIN_KEY is named in this comment only.")')"
+
+# postures-are-held (invariant 22): the gateway's client keys, identity strict and
+# wardryx key, the broker's DLP, tool scan and wardryx settings, and no devkey.
+run_case "postures-are-held: a gateway start does not set the client keys" fail \
+	'./scripts/postures-are-held.sh' \
+	"$(py 'edit("up.sh", "TOKENFUSE_CLIENT_KEYS=\"$GATEWAY_CLIENT_KEYS\"", "TOKENFUSE_CLIENT_KEYX=\"$GATEWAY_CLIENT_KEYS\"")')" \
+	"does not set TOKENFUSE_CLIENT_KEYS"
+
+run_case "postures-are-held: the client keys are a literal" fail \
+	'./scripts/postures-are-held.sh' \
+	"$(py 'edit("up.sh", "TOKENFUSE_CLIENT_KEYS=\"$GATEWAY_CLIENT_KEYS\"", "TOKENFUSE_CLIENT_KEYS=\"abc:stack-up-demo\"")')" \
+	"from something other than a run variable"
+
+run_case "postures-are-held: no refusal after the client-key mint" fail \
+	'./scripts/postures-are-held.sh' \
+	"$(py 'edit("up.sh", "[ -n \"$GATEWAY_CLIENT_KEYS\" ] \\", ": \\")')" \
+	"no refusal"
+
+run_case "postures-are-held: identity strict is not enforce" fail \
+	'./scripts/postures-are-held.sh' \
+	"$(py 'edit("up.sh", "TOKENFUSE_IDENTITY_STRICT=\"enforce\" \\", "TOKENFUSE_IDENTITY_STRICT=\"warn\" \\")')" \
+	"does not set TOKENFUSE_IDENTITY_STRICT"
+
+run_case "postures-are-held: the gateway hands wardryx the devkey literal" fail \
+	'./scripts/postures-are-held.sh' \
+	"$(py 'edit("up.sh", "TOKENFUSE_WARDRYX_KEY=\"$WARDRYX_PEP_KEY\" \\", "TOKENFUSE_WARDRYX_KEY=\"devkey\" \\")')" \
+	"hands wardryx a literal key"
+
+run_case "postures-are-held: the devkey switch is assigned" fail \
+	'./scripts/postures-are-held.sh' \
+	"$(py 'edit("up.sh", "  WARDRYX_KEYS=\"$WARDRYX_PEP_KEY:default:pep,$WARDRYX_ADMIN_KEY:default:admin\" \\", "  WARDRYX_KEYS=\"$WARDRYX_PEP_KEY:default:pep,$WARDRYX_ADMIN_KEY:default:admin\" \\\n  WARDRYX_ALLOW_DEVKEY=\"1\" \\")')" \
+	"assigns WARDRYX_ALLOW_DEVKEY"
+
+run_case "postures-are-held: the scanner key is the devkey literal" fail \
+	'./scripts/postures-are-held.sh' \
+	"$(py 'edit("up.sh", "SCOPYX_WARDRYX_KEY=\"$WARDRYX_PEP_KEY\" \\", "SCOPYX_WARDRYX_KEY=\"devkey\" \\")')" \
+	"names the devkey literal outside a comment"
+
+run_case "postures-are-held: the wardryx key list gives the gateway a viewer role" fail \
+	'./scripts/postures-are-held.sh' \
+	"$(py 'edit("up.sh", ":default:pep,$WARDRYX_ADMIN_KEY", ":default:viewer,$WARDRYX_ADMIN_KEY")')" \
+	"does not name the gateway"
+
+run_case "postures-are-held: broker DLP is shadow" fail \
+	'./scripts/postures-are-held.sh' \
+	"$(py 'edit("up.sh", "TOKENFUSE_MCP_DLP=\"block\" \\", "TOKENFUSE_MCP_DLP=\"shadow\" \\")')" \
+	"does not set TOKENFUSE_MCP_DLP"
+
+run_case "postures-are-held: broker scan warns" fail \
+	'./scripts/postures-are-held.sh' \
+	"$(py 'edit("up.sh", "TOKENFUSE_MCP_SCAN=\"block\" \\", "TOKENFUSE_MCP_SCAN=\"warn\" \\")')" \
+	"does not set TOKENFUSE_MCP_SCAN"
+
+run_case "postures-are-held: broker fail mode is open" fail \
+	'./scripts/postures-are-held.sh' \
+	"$(py 'edit("up.sh", "\"TOKENFUSE_WARDRYX_FAILMODE=closed\"", "\"TOKENFUSE_WARDRYX_FAILMODE=open\"")')" \
+	"wardryx array does not set"
+
+run_case "postures-are-held: broker wardryx key is a literal" fail \
+	'./scripts/postures-are-held.sh' \
+	"$(py 'edit("up.sh", "\"TOKENFUSE_WARDRYX_KEY=$WARDRYX_PEP_KEY\"", "\"TOKENFUSE_WARDRYX_KEY=devkey\"")')" \
+	"does not hand TOKENFUSE_WARDRYX_KEY a run variable"
+
+run_case "postures-are-held: a comment that names devkey is not a fault" pass \
+	'./scripts/postures-are-held.sh' \
+	"$(py 'edit("up.sh", "# scripts/declassify-is-keyed.sh holds both halves.", "# scripts/declassify-is-keyed.sh holds both halves.\n# devkey and WARDRYX_ALLOW_DEVKEY are named in this comment only.")')"
+
+run_case "postures-are-held: no gateway start left to judge" fail \
+	'./scripts/postures-are-held.sh' \
+	"$(py 's = open("up.sh").read()
+assert s.count("\"$GATEWAY_BIN\" > \"$LOGS_DIR/gateway.log\"") == 2, "expected two gateway starts"
+s = s.replace("\"$GATEWAY_BIN\" > \"$LOGS_DIR/gateway.log\"", "\"$GATEWAYX\" > \"$LOGS_DIR/gateway.log\"")
+open("up.sh", "w").write(s)')" \
+	"measured nothing"
+
+run_case "postures-are-held: no up.sh left to read" fail \
+	'./scripts/postures-are-held.sh' \
+	"$(py 'import subprocess, os
+assert os.path.exists("up.sh"), "expected up.sh"
+subprocess.run(["git", "mv", "up.sh", "up.bash"], check=True)')" \
+	"measured nothing"
 
 echo
 if [ -n "$(git status --porcelain)" ]; then

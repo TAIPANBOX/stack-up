@@ -45,6 +45,9 @@ jobs:
       - name: the gateway's admin routes take a key minted for the run, written to a 0600 file, never printed
         run: ./scripts/admin-keys-are-per-run.sh
 
+      - name: the gateway and the broker hold their postures, from values minted for the run, and wardryx answers only the pep key
+        run: ./scripts/postures-are-held.sh
+
       - name: the gateway fails closed on wardryx, and the launcher stops when wardryx does not come up
         run: ./scripts/wardryx-fails-closed.sh
 

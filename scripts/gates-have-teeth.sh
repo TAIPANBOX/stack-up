@@ -1438,7 +1438,7 @@ run_case "postures-are-held: the client key is on a curl command line" fail \
 
 run_case "postures-are-held: a comment that names the client key is not a fault" pass \
 	'./scripts/postures-are-held.sh' \
-	"$(py 'edit("up.sh", "# printf is a shell builtin, so the secret is on no argv.", "# printf is a shell builtin, so the secret is on no argv.\n# curl -H \"x-fuse-key: $GATEWAY_CLIENT_SECRET\" would put it on an argv.")')"
+	"$(py 'edit("up.sh", "so the secret is on no argv.", "so the secret is on no argv.\n  # curl -H \"x-fuse-key: $GATEWAY_CLIENT_SECRET\" would put it on an argv.")')"
 
 echo
 if [ -n "$(git status --porcelain)" ]; then

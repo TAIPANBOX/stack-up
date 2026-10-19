@@ -78,6 +78,21 @@ writes_file() {
   [[ "$t" == *">"* ]]
 }
 
+# strip_head <command>: the command with any leading keywords and grouping stripped
+# (if, elif, then, else, do, {, (, !), so the word that runs is at the front. A
+# statement such as `if ! ( printf ... > file )` runs printf.
+strip_head() {
+  local s="$1" prev=""
+  while [ "$s" != "$prev" ]; do
+    prev="$s"
+    s="${s#"${s%%[![:space:]]*}"}"
+    for kw in 'if ' 'elif ' 'while ' 'until ' 'then ' 'else ' 'do ' '{ ' '( ' '! '; do
+      if [[ "$s" == "$kw"* ]]; then s="${s#"$kw"}"; fi
+    done
+  done
+  printf '%s' "$s"
+}
+
 # split_commands <text>: one command per output line. Splits on && || and ;
 # only OUTSIDE quotes, so a ; inside a printf format string does not cut it.
 split_commands() {
@@ -152,13 +167,7 @@ while IFS= read -r ll; do
   [ -n "$ll" ] || continue
   ln="${ll%%:*}"
   while IFS= read -r cmd; do
-    s="${cmd#"${cmd%%[![:space:]]*}"}"
-    for kw in 'then ' 'else ' 'do ' '{ ' '( ' '! '; do
-      if [[ "$s" == "$kw"* ]]; then
-        s="${s#"$kw"}"
-        s="${s#"${s%%[![:space:]]*}"}"
-      fi
-    done
+    s="$(strip_head "$cmd")"
     [[ "$s" =~ ^(log|warn|die|echo|printf)([[:space:]]|$) ]] || continue
     writes_file "$cmd" && continue
     for t in $tainted; do
@@ -190,13 +199,7 @@ while IFS= read -r ll; do
   ln="${ll%%:*}"
   text="${ll#*:}"
   while IFS= read -r cmd; do
-    s="${cmd#"${cmd%%[![:space:]]*}"}"
-    for kw in 'then ' 'else ' 'do ' '{ ' '( ' '! '; do
-      if [[ "$s" == "$kw"* ]]; then
-        s="${s#"$kw"}"
-        s="${s#"${s%%[![:space:]]*}"}"
-      fi
-    done
+    s="$(strip_head "$cmd")"
     [[ "$s" =~ ^(printf|echo)([[:space:]]|$) ]] || continue
     writes_file "$cmd" || continue
     for t in $tainted; do

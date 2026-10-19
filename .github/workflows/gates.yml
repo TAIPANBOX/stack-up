@@ -96,6 +96,12 @@ jobs:
       - name: the demo runs after the planes that answer it
         run: ./scripts/demo-runs-after-its-planes.sh
 
+      - name: every component is built from a release tag at its pinned commit
+        run: ./scripts/pins-are-release-tags.sh
+
+      - name: a typed risk signal holds the call it never reaches
+        run: ./scripts/risk-hold-is-seeded.sh
+
       # Last, because it mutates tracked files and restores them. It needs a
       # clean tree and says so plainly, so it also reports any earlier step
       # that starts writing into the checkout.

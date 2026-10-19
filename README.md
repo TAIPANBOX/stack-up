@@ -467,9 +467,14 @@ server you named. `--typed-plan` prints this before anything starts. Each call c
 one ask, capped by the proxy's own `TYPRYX_MAX_CALLS_PER_HOUR` (typryx's default is
 1000, kept separately from the service's).
 
-**No policy is seeded.** A policy that holds calls is yours to write. This is
-wardryx's own example (its README, "Typed risk signals"), pointed at the broker's
-demo agent:
+**The launcher seeds one hold.** With `--typed-risk-signal`, wardryx gets the rule
+`stack-up-typed-risk-hold`: a brokered call whose risk class is destructive,
+external_send or financial at 0.8 or more is held for a person, and so is a brokered
+call the signal never reaches (`when_absent: hold`, invariant 28 in CLAUDE.md). An
+approval lifts one held call; single-use stays on. Without the flag nothing is seeded.
+
+To write a rule of your own, this is wardryx's example (its README, "Typed risk
+signals"), pointed at the broker's demo agent:
 
 ```sh
 curl -X PUT http://127.0.0.1:8090/v1/policies/risk-hold \
@@ -560,9 +565,14 @@ The first run builds tokenfuse in release mode and can take several minutes.
 After that, builds are cached and startup is seconds. Everything after the
 initial build and clone works offline.
 
-If you already have sibling checkouts of these repos next to `stack-up`,
-it reuses them (it only reads them and runs their own build tool; it never
-modifies them). Otherwise it shallow-clones what it needs into `~/.stack-up/`.
+Every component is built from its **pinned release tag**, at the commit that tag
+names. The pins are one table at the top of `up.sh` (`pin_of`), and each clone is
+refused unless its commit is the one the table names. Clones go into
+`~/.stack-up/repos/`. A sibling checkout next to `stack-up` is not used by
+default, because a branch there can hold anything. `--from-main` builds sibling or
+main checkouts instead, as this launcher used to, and the run says at the top that
+its build is not a release. verdryx publishes no release tag, so it is installed only
+with `--from-main`.
 
 ## What you are looking at
 
@@ -835,7 +845,8 @@ user here, so they are separated by process and directory, not by user ID.
 --with-delegation  also start vouchryx, the delegation-token service, and open the gateway's delegation door against it
 --with-finops      also start costcrew, the FinOps console, wired to this launcher's bus
 --force-install    replace binaries another tool installed
---workspace <dir>  look here for sibling checkouts before cloning
+--workspace <dir>  look here for sibling checkouts (with --from-main only)
+--from-main        build sibling or main checkouts instead of the pinned releases (a developer switch; not a release)
 --with-typed       also start typryx (typed answers; stub backend unless a mode is chosen)
 --typed-mode <m>   jev | own-model | off: where typed-answer data goes (see "Typed answers: choose where your data goes")
 --typed-key-file <path>     a file holding the key (required for jev, optional for own-model)

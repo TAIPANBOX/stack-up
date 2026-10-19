@@ -56,6 +56,8 @@ step "refusals keep their exit status" "./scripts/die-keeps-its-exit-status.sh"
 step "demo issuer's trusted line is unbound" "./scripts/demo-issuer-is-unbound.sh"
 step "bus directory stays this user's" "./scripts/bus-is-operator-owned.sh"
 step "demo runs after the planes that answer it" "./scripts/demo-runs-after-its-planes.sh"
+step "every component built from a release tag" "./scripts/pins-are-release-tags.sh"
+step "typed risk signal holds what it never reaches" "./scripts/risk-hold-is-seeded.sh"
 
 echo
 if [ "$fail" -ne 0 ]; then

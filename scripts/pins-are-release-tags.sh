@@ -106,7 +106,7 @@ while IFS= read -r name; do
     *) problem "pinned_repo names $name, which has no pin_of entry" ;;
   esac
 done <<NAMES
-$(grep -o -E 'pinned_repo [a-z][a-z-]*' up.sh | awk '{print $2}' | sort -u)
+$(grep -v -E '^[[:space:]]*#' up.sh | grep -o -E 'pinned_repo [a-z][a-z-]*' | awk '{print $2}' | sort -u)
 NAMES
 
 # 3. locate_repo is called only from pinned_repo.

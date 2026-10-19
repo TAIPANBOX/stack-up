@@ -136,7 +136,9 @@
 #                       costs one ask of the SAME backend, and under jev that
 #                       sends the call's tool name, arguments and target to
 #                       TypeSafe AI: --typed-plan says so before anything
-#                       starts. No policy is seeded; README.md has an example.
+#                       starts. It also seeds one wardryx rule that holds a
+#                       brokered call the signal never reaches (invariant 28;
+#                       README.md shows how to write your own).
 #   --run-budget-ceiling <usd>
 #                       the most any ONE run may be granted when its budget
 #                       comes from the caller's header, a policy default or the
@@ -168,7 +170,11 @@
 #   --typed-plan        the same thing, under its first name
 #   --force-install     replace binaries another tool installed (default: leave
 #                       them alone and use them as they are)
-#   --workspace <dir>   look here for sibling checkouts before cloning
+#   --workspace <dir>   look here for sibling checkouts (--from-main only; a default build
+#                       clones the pinned release tags instead)
+#   --from-main         build sibling or main checkouts instead of the pinned release
+#                       tags. A developer switch: its build is not a release, and
+#                       the run says so at the top
 #                       (default: the directory this repo sits in)
 #   -h, --help          show this and exit
 #
@@ -239,12 +245,41 @@ KEYRYX_CUSTODY_ROOT_KEY_PATH="$KEYRYX_DIR/custody-root.key"
 KEYRYX_WITNESS_ROOT_KEY_PATH="$KEYRYX_DIR/witness-root.key"
 KEYRYX_POLICY_PATH="$KEYRYX_DIR/policy.json"
 KEYRYX_WARDRYX_KEY_PATH="$KEYRYX_DIR/wardryx.key"
-# keyryx is built from this tag's commit and nothing else. v0.1.1 publishes a
-# container image and no binary, and this launcher runs no containers, so the
-# commit the tag names is what gets built, and the clone is refused unless it is
-# that commit. Moving keyryx is changing these two lines, nothing else.
-KEYRYX_TAG="v0.1.1"
-KEYRYX_COMMIT="7384897fff61738cfa9dbbe54c24061dbe65251b"
+# ---- THE PIN TABLE (invariant 29) -----------------------------------------
+#
+# The one place a component's release is written down. Every component this
+# launcher builds is checked out at the release tag on its line and at the commit
+# that tag names, and pinned_repo refuses any checkout that is not that commit. A
+# branch moves under the launcher without telling it; a tag and its commit do
+# not. Moving a component is changing its line here and nothing else.
+#
+# Each line was read from the repository's own remote on 2026-10-19: git
+# ls-remote --tags, the peeled commit of the tag. scripts/pins-are-release-tags.sh
+# holds the format. keyryx publishes v0.1.1 as a container image and no binary, so
+# its commit is built here with go build, and this launcher runs no containers.
+#
+# verdryx publishes no release tag, so it has no line that names one. It is built
+# only with --from-main, which says so.
+pin_of() {
+  case "$1" in
+    keyryx)         echo "v0.1.1 7384897fff61738cfa9dbbe54c24061dbe65251b" ;;
+    tokenfuse)      echo "v1.19.0 84eabe61b0d5785d5198192c296ab1c58ab346bb" ;;
+    wardryx)        echo "v2.3.0 f5db8a95964adb9441690d5846631ea892b367be" ;;
+    vouchryx)       echo "v0.6.0 d60e300edb8187482847fec30f188b0d561f5519" ;;
+    idryx)          echo "v1.3.0 ac69d395fa927d58fab853fdcceeb6d50f3a537d" ;;
+    heraldyx)       echo "v0.8.0 c3b080bb48e14fe2c0f8a0a41d9899e28ad13858" ;;
+    scopyx)         echo "v1.1.0 b23266e36902260a149a615cc8061a2dfee4969c" ;;
+    costcrew)       echo "v0.10.0 a3549f2997953e92d01658758c831f5dc92776a3" ;;
+    typryx)         echo "v0.5.0 d5d4c0c331f4829dd564e9ee8505583cdb52dbf9" ;;
+    trailryx)       echo "v1.4.0 8e3bb7b454aed49b2bb20e975e63ec54136cc17d" ;;
+    qryx)           echo "v1.1.0 e2e776d648aa28ffa9971bb21bc828335c86a89c" ;;
+    mockryx)        echo "v0.3.0 14c954dcf8dbcca40b2fa28c5cf202372b8480fc" ;;
+    agent-stack-go) echo "v2.0.1 e52e7fc98d77996429543d342b9bf9e7899304a0" ;;
+    engram)         echo "v3.0.0 b0b72a87bda73b8ec1287ee6d2450dd60290a0b3" ;;
+    verdryx)        ;;
+    *)              ;;
+  esac
+}
 # Where a build lands before it is installed, so nothing is ever compiled
 # directly onto a path something else may be reading or executing.
 BUILD_DIR="$STACK_UP_HOME/build"
@@ -365,6 +400,9 @@ FIREWALL_MODE="enforce"
 # scanner off silently.
 PII_MODE="shadow"
 FORCE_INSTALL=0
+# --from-main builds sibling or main checkouts instead of the pinned releases (the
+# pin table above). A developer switch: it is never the default, and it says so.
+FROM_MAIN=0
 WORKSPACE="${STACK_UP_WORKSPACE:-$(dirname "$SCRIPT_DIR")}"
 
 # Print the comment header above, from the first descriptive line to the last
@@ -410,12 +448,17 @@ while [ $# -gt 0 ]; do
     --pii=*) PII_MODE="${1#--pii=}" ;;
     --typed-plan|--plan) TYPED_PLAN=1 ;;
     --force-install) FORCE_INSTALL=1 ;;
+    --from-main) FROM_MAIN=1 ;;
     --workspace) shift; WORKSPACE="${1:-}"; [ -n "$WORKSPACE" ] || { echo "stack-up: --workspace needs a directory" >&2; exit 2; } ;;
     -h|--help) usage; exit 0 ;;
     *) echo "stack-up: unknown option '$1' (try --help)" >&2; exit 2 ;;
   esac
   shift
 done
+
+if [ "$FROM_MAIN" -eq 1 ]; then
+  printf 'stack-up: --from-main builds sibling or main checkouts, NOT the pinned release tags (invariant 29). A developer switch: nothing it builds is a release.\n' >&2
+fi
 
 # --------------------------------------------------------------------------
 # Typed answers: where the data goes
@@ -643,7 +686,7 @@ print_typed_plan() {
     printf 'typed: risk signal: on (opt-in): typryx wardryx-proxy on 127.0.0.1:%s in front of wardryx; only the MCP broker is pointed at it, the LLM gateway keeps talking to wardryx directly\n' "$TYPRYX_PROXY_PORT"
     printf 'typed: risk signal leaves this machine: %s\n' "$TYPED_RISK_LEAVES"
     printf 'typed: risk signal cost: one ask of that backend per eligible brokered call, capped by the proxy'"'"'s own TYPRYX_MAX_CALLS_PER_HOUR (typryx default 1000, separate from the service'"'"'s)\n'
-    printf 'typed: risk signal policy: none is seeded; a hold_if_signal rule is yours to write (README.md has an example)\n'
+    printf 'typed: risk signal policy: stack-up-typed-risk-hold holds a brokered call whose risk class is destructive, external_send or financial at 0.8 or more, and holds one the signal never reaches (when_absent: hold; invariant 28); an approval lifts one call\n'
     printf 'typed: risk signal deadlines: the proxy waits %s ms for the backend'"'"'s answer (typryx'"'"'s own default, 150 ms, would drop a hosted or local-model answer), the broker waits %s ms for the decision\n' "$RISK_ASK_TIMEOUT_MS" "$RISK_DECIDE_TIMEOUT_MS"
     unset_next=0
     for e in "${TYPRYX_PROXY_ENV[@]}"; do
@@ -705,6 +748,11 @@ resolve_pii_mode() {
 }
 
 print_launch_plan() {
+  if [ "$FROM_MAIN" -eq 1 ]; then
+    printf 'launch: components: built from SIBLING OR MAIN CHECKOUTS (--from-main), NOT the pinned release tags (invariant 29)\n'
+  else
+    printf 'launch: components: built from their pinned release tags, each at the commit the pin table names (invariant 29); a checkout that is not that commit is refused; verdryx has no release tag and is not built\n'
+  fi
   printf 'launch: gateway run-budget ceiling: %s USD per run (TOKENFUSE_MAX_RUN_BUDGET_USD; a budget that comes from the caller, a policy default or the built-in default is clamped to it, a Cloud budget is not)\n' "$RUN_BUDGET_CEILING_USD"
   printf 'launch: agent firewall: %s (TOKENFUSE_FIREWALL on every gateway start; enforce refuses exec, write and network egress on a run that read untrusted input, and network egress on a run holding a secret; shadow records those refusals and lets them through; off turns the firewall off)\n' "$FIREWALL_MODE"
   printf 'launch: PII masks: %s (TOKENFUSE_DLP_PII on every gateway start and TOKENFUSE_MCP_DLP_PII on the MCP broker; off records nothing, shadow notes how many and which kinds (a gateway response header, a broker log line; no event or trace row) and forwards the data unchanged, mask redacts it before it is forwarded, block refuses the call that carries it)\n' "$PII_MODE"
@@ -880,6 +928,36 @@ locate_repo() {
     git clone --depth 1 "$GH/$name.git" "$cand" >&2 || return 1
   fi
   echo "$cand"
+}
+
+# pinned_repo <component> [alt-casing...] -> prints the path of a checkout of
+# <component> at its pinned release (invariant 29, the pin table above). The clone
+# is ours, under $REPOS_DIR, shallow, at the tag, and it is made again when its HEAD
+# is not the pinned commit. A clone that is still not that commit is refused, and
+# nothing is built from it. Only --from-main goes to a sibling or main checkout
+# instead, through locate_repo, and the warning at the top of the run says so.
+pinned_repo() {
+  local name="$1" pin tag commit dir
+  shift
+  if [ "$FROM_MAIN" -eq 1 ]; then
+    locate_repo "$name" "$@"
+    return
+  fi
+  pin="$(pin_of "$name")"
+  if [ -z "$pin" ]; then
+    warn "$name publishes no release tag, so this launcher cannot pin it. It is built only with --from-main."
+    return 1
+  fi
+  read -r tag commit <<<"$pin"
+  dir="$REPOS_DIR/$name"
+  if [ "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" != "$commit" ]; then
+    rm -rf "$dir"
+    log "cloning $name $tag ..." >&2
+    git clone --quiet --depth 1 --branch "$tag" "$GH/$name.git" "$dir" 2>/dev/null \
+      || { warn "could not clone $name $tag from $GH/$name.git"; return 1; }
+  fi
+  [ "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" = "$commit" ] || { warn "$name at $dir is not $tag ($commit); refusing to build it."; return 1; }
+  echo "$dir"
 }
 
 # --------------------------------------------------------------------------
@@ -1437,7 +1515,7 @@ trap 'cleanup 0' INT TERM
 # Build + start: tokenfuse gateway + cloud (mandatory)
 # --------------------------------------------------------------------------
 
-TF_REPO="$(locate_repo tokenfuse)" || die "could not fetch tokenfuse."
+TF_REPO="$(pinned_repo tokenfuse)" || die "could not fetch tokenfuse at its pinned release (see the pin table)."
 
 migrate_legacy tokenfuse-gateway
 migrate_legacy tokenfuse-cloud
@@ -1564,7 +1642,7 @@ fi
 # safe default only because nothing pretends otherwise.
 DELEG_ENV=()
 if [ "$WITH_DELEGATION" -eq 1 ]; then
-  VOUCHRYX_REPO="$(locate_repo vouchryx)" || { warn "could not fetch vouchryx; skipping delegation."; WITH_DELEGATION=0; }
+  VOUCHRYX_REPO="$(pinned_repo vouchryx)" || { warn "could not fetch vouchryx; skipping delegation."; WITH_DELEGATION=0; }
 fi
 if [ "$WITH_DELEGATION" -eq 1 ]; then
   migrate_legacy vouchryx
@@ -1970,15 +2048,11 @@ fi
 # Only with the policy plane. keyryx has no other consumer in this launcher, and
 # a stand without wardryx has no approval to sign.
 if [ "$WANT_POLICY" -eq 1 ]; then
-  KEYRYX_REPO="$REPOS_DIR/keyryx"
-  if [ "$(git -C "$KEYRYX_REPO" rev-parse HEAD 2>/dev/null)" != "$KEYRYX_COMMIT" ]; then
-    rm -rf "$KEYRYX_REPO"
-    log "cloning keyryx $KEYRYX_TAG ..."
-    git clone --quiet --depth 1 --branch "$KEYRYX_TAG" "$GH/keyryx.git" "$KEYRYX_REPO" 2>/dev/null \
-      || die "could not clone keyryx $KEYRYX_TAG. wardryx signs its approvals through keyryx, and the stand will not run without it."
-  fi
-  [ "$(git -C "$KEYRYX_REPO" rev-parse HEAD 2>/dev/null)" = "$KEYRYX_COMMIT" ] \
-    || die "keyryx $KEYRYX_TAG is not the commit this launcher pins ($KEYRYX_COMMIT); refusing to build it."
+  # The pin is read from the table above and the clone is made and checked by
+  # pinned_repo, which refuses a checkout that is not that commit (invariant 29).
+  read -r KEYRYX_TAG KEYRYX_COMMIT <<<"$(pin_of keyryx)"
+  KEYRYX_REPO="$(pinned_repo keyryx)" \
+    || die "could not fetch keyryx $KEYRYX_TAG. wardryx signs its approvals through keyryx, and the stand will not run without it."
 
   KEYRYX_BIN="$BIN_DIR/keyryx"
   if foreign_binary keyryx; then
@@ -2076,7 +2150,7 @@ fi
 # --------------------------------------------------------------------------
 
 if [ "$WANT_POLICY" -eq 1 ]; then
-  WARDRYX_REPO="$(locate_repo wardryx Wardryx)" || die "could not fetch wardryx, and the gateway started above is already wired to it; refusing to run it without its policy plane."
+  WARDRYX_REPO="$(pinned_repo wardryx Wardryx)" || die "could not fetch wardryx, and the gateway started above is already wired to it; refusing to run it without its policy plane."
 fi
 if [ "$WANT_POLICY" -eq 1 ]; then
   migrate_legacy wardryx
@@ -2119,6 +2193,28 @@ YAML
   else
     warn "$WARDRYX_BIN predates wardryx v1.3.0 and does not read allow_tool, so the mockryx-allow-list rehearsal rule is not seeded. Update the wardryx checkout ($WARDRYX_REPO) so the next run rebuilds it."
   fi
+  # The typed risk hold (--typed-risk-signal, invariant 28). A brokered tool call that
+  # the signal never reaches is held for a person instead of allowed for want of one:
+  # a producer outage, a spent budget or a call padded past the arguments cap each
+  # left a hold_if_signal rule nothing to read. Seeded only under the flag, and only
+  # when the wardryx that will run names when_absent (wardryx v1.4.0 and later). The
+  # target is every agent: a brokered call carries the broker's caller id, which is
+  # not one trust domain. Single-use stays on (WARDRYX_APPROVAL_SINGLE_USE is not
+  # set here), so one approval lifts one held call.
+  if [ "$TYPED_RISK_SIGNAL" -eq 1 ]; then
+    bin_reads_setting "$WARDRYX_BIN" when_absent \
+      || die "--typed-risk-signal needs wardryx v1.4.0 or newer, for the hold on a missing signal, and $WARDRYX_BIN does not read when_absent. Update the wardryx checkout ($WARDRYX_REPO) and run again with --force-install if another tool installed it."
+    cat >> "$POLICY_FILE" <<'YAML'
+- name: stack-up-typed-risk-hold
+  target: "agent://*"
+  hold_if_signal:
+    name: action.risk_class
+    values: [destructive, external_send, financial]
+    min_probability: 0.8
+    when_absent: hold
+YAML
+    log "typed: wardryx holds a brokered call that the risk signal does not reach (stack-up-typed-risk-hold, when_absent: hold); an approval lifts one call"
+  fi
   # WARDRYX_KEYS names this run's two keys in wardryx's own "key:org:role" form.
   # The gateway, the MCP broker and scopyx are enforcement points and hold the pep
   # key; the admin key is the operator's. With real keys set, wardryx answers no
@@ -2155,7 +2251,7 @@ fi
 # --------------------------------------------------------------------------
 
 if [ "$WANT_IDENTITY" -eq 1 ]; then
-  IDRYX_REPO="$(locate_repo idryx Idryx)" || { warn "could not fetch idryx; skipping."; WANT_IDENTITY=0; }
+  IDRYX_REPO="$(pinned_repo idryx Idryx)" || { warn "could not fetch idryx; skipping."; WANT_IDENTITY=0; }
 fi
 if [ "$WANT_IDENTITY" -eq 1 ]; then
   migrate_legacy idryx
@@ -2200,7 +2296,7 @@ fi
 # --------------------------------------------------------------------------
 
 if [ "$WANT_NOTIFY" -eq 1 ]; then
-  HERALDYX_REPO="$(locate_repo heraldyx Heraldyx)" || { warn "could not fetch heraldyx; skipping."; WANT_NOTIFY=0; }
+  HERALDYX_REPO="$(pinned_repo heraldyx Heraldyx)" || { warn "could not fetch heraldyx; skipping."; WANT_NOTIFY=0; }
 fi
 if [ "$WANT_NOTIFY" -eq 1 ]; then
   migrate_legacy heraldyx
@@ -2262,7 +2358,7 @@ fi
 # --------------------------------------------------------------------------
 
 if [ "$WANT_EGRESS" -eq 1 ]; then
-  SCOPYX_REPO="$(locate_repo scopyx Scopyx)" || { warn "could not fetch scopyx; skipping."; WANT_EGRESS=0; }
+  SCOPYX_REPO="$(pinned_repo scopyx Scopyx)" || { warn "could not fetch scopyx; skipping."; WANT_EGRESS=0; }
 fi
 if [ "$WANT_EGRESS" -eq 1 ]; then
   migrate_legacy scopyx
@@ -2371,7 +2467,7 @@ fi
 # by the seal and counted as foreign. Same variable the seal is given, one
 # source, and invariant 7 holds the pair.
 if [ "$WITH_FINOPS" -eq 1 ]; then
-  COSTCREW_REPO="$(locate_repo costcrew)" || { warn "could not fetch costcrew; skipping finops."; WITH_FINOPS=0; }
+  COSTCREW_REPO="$(pinned_repo costcrew)" || { warn "could not fetch costcrew; skipping finops."; WITH_FINOPS=0; }
 fi
 if [ "$WITH_FINOPS" -eq 1 ]; then
   migrate_legacy costcrew
@@ -2418,9 +2514,9 @@ fi
 # `score`, or `noul` answer with a probability for every option, instead of a
 # sentence a policy cannot threshold.
 #
-# HOW THE BINARY IS OBTAINED. Same as vouchryx and scopyx above: a sibling
-# checkout is reused if present, otherwise `locate_repo` shallow-clones it, and
-# the binary is built from source with `go build`, never pulled as a
+# HOW THE BINARY IS OBTAINED. Same as vouchryx and scopyx above: the pinned release
+# is cloned (`pinned_repo`, invariant 29), and the binary is built from source with
+# `go build`, never pulled as a
 # container image. This launcher builds every plane from source and runs no
 # containers (CLAUDE.md invariant 1's neighbourhood); the published
 # `ghcr.io/taipanbox/typryx` image is for stack-single and stack-k8s, which
@@ -2457,7 +2553,7 @@ fi
 # the way costcrew's own data directory sits beside, not inside, the shared
 # bus: nothing reads it as an event stream, so there is no bus for it to join.
 if [ "$WITH_TYPED" -eq 1 ]; then
-  TYPRYX_REPO="$(locate_repo typryx)" || { warn "could not fetch typryx; skipping."; WITH_TYPED=0; }
+  TYPRYX_REPO="$(pinned_repo typryx)" || { warn "could not fetch typryx; skipping."; WITH_TYPED=0; }
 fi
 if [ "$WITH_TYPED" -eq 1 ]; then
   migrate_legacy typryx
@@ -2565,8 +2661,9 @@ fi
 # sends (tokenfuse#353), for which it asks typryx in-process "what risk class is
 # this call" and appends the answer as one `signals` entry. wardryx v1.2.0 reads
 # it through a `hold_if_signal` policy rule (wardryx#81), which can turn an allow
-# into a hold and nothing else. No such rule is seeded here: a policy that holds
-# calls is the operator's to write, and README.md shows one.
+# into a hold and nothing else. The one rule seeded here is stack-up-typed-risk-hold
+# (invariant 28): it holds a call the signal never reaches, and it is written only
+# under --typed-risk-signal. Any other policy that holds calls is the operator's to write.
 #
 # WHO IS POINTED AT IT. Only the broker (BROKER_WARDRYX_ENV, below). The LLM
 # gateway keeps talking to wardryx directly, on the estate audit's reasoning
@@ -2609,9 +2706,9 @@ if [ "$TYPED_RISK_SIGNAL" -eq 1 ]; then
   # The broker's policy gate is OFF unless TOKENFUSE_WARDRYX_MODE and _URL are
   # both set (tokenfuse docs/23-mcp-broker-v2.md section 2), so pointing the URL
   # alone would change nothing. enforce, the same mode the gateway runs in here,
-  # so a hold_if_signal hold refuses the call instead of annotating it; with no
-  # such rule and no policy matching the broker's agent, every call is allowed
-  # as before. enforce also means a call with no x-fuse-agent-id is refused 400
+  # so a hold_if_signal hold refuses the call instead of annotating it. The rule
+  # that holds a call the signal never reaches is seeded with the wardryx policy
+  # above (invariant 28), so a call with no signal is held, not allowed. enforce also means a call with no x-fuse-agent-id is refused 400
   # identity_required, which the example this run prints already carries. The
   # fail mode is closed, as on the gateway: a call wardryx cannot answer is refused,
   # not allowed. The key is this run's enforcement-point key, as the gateway's is.
@@ -2684,7 +2781,7 @@ install_go_tool() {
   case "$name" in
     agent-conform) repo_name="agent-stack-go" ;;
   esac
-  repo="$(locate_repo "$repo_name" "$@")" || { warn "could not fetch $name; skipping it."; return 1; }
+  repo="$(pinned_repo "$repo_name" "$@")" || { warn "could not fetch $name; skipping it."; return 1; }
   watch=("$repo/cmd" "$repo/internal" "$repo/go.mod")
   case "$name" in
     agent-conform) watch+=("$repo/chain" "$repo/event" "$repo/delegation" "$repo/passport") ;;
@@ -2734,7 +2831,7 @@ install_go_tool() {
 install_py_tool() {
   local name="$1" script="$2" extras="$3" import_check="$4"; shift 4
   local repo venv="$VENV_DIR/$name"
-  repo="$(locate_repo "$name" "$@")" || { warn "could not fetch $name; skipping it."; return 1; }
+  repo="$(pinned_repo "$name" "$@")" || { warn "could not fetch $name; skipping it."; return 1; }
   migrate_legacy "$script"
   if foreign_binary "$script"; then
     log "$script: already installed by another tool; using $BIN_DIR/$script"
@@ -2863,7 +2960,7 @@ fi
 # --------------------------------------------------------------------------
 
 if [ "$WANT_RECORDS" -eq 1 ]; then
-  TRAILRYX_REPO="$(locate_repo trailryx Trailryx)" || { warn "could not fetch trailryx; skipping the record plane."; WANT_RECORDS=0; }
+  TRAILRYX_REPO="$(pinned_repo trailryx Trailryx)" || { warn "could not fetch trailryx; skipping the record plane."; WANT_RECORDS=0; }
 fi
 if [ "$WANT_RECORDS" -eq 1 ]; then
   migrate_legacy trailryx-node
@@ -3047,7 +3144,7 @@ if [ "$WITH_TYPED" -eq 1 ]; then
   if [ "$TYPED_RISK_SIGNAL" -eq 1 ]; then
     log "risk:    typryx wardryx-proxy on http://127.0.0.1:$TYPRYX_PROXY_PORT in front of wardryx; ONLY the broker is pointed at it (the gateway talks to wardryx directly)"
     log "         data:    $TYPED_RISK_LEAVES"
-    log "         no policy is seeded: a brokered call carries typryx's action.risk_class answer to wardryx, and a hold_if_signal rule you write decides whether it holds (README.md)"
+    log "         policy:  stack-up-typed-risk-hold holds a brokered call whose risk class is destructive, external_send or financial at 0.8 or more, and any brokered call the signal never reaches; an approval lifts one call (invariant 28)"
   fi
 fi
 if [ "$WANT_RECORDS" -eq 1 ]; then

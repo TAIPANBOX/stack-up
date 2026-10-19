@@ -1524,7 +1524,7 @@ run_case "keyryx-is-per-run: the witness alerts go onto the shared bus" fail \
 
 run_case "keyryx-is-per-run: the pin is a branch name, not a commit" fail \
 	'./scripts/keyryx-is-per-run.sh' \
-	"$(py 'edit("up.sh", "KEYRYX_COMMIT=\"7384897fff61738cfa9dbbe54c24061dbe65251b\"", "KEYRYX_COMMIT=\"main\"")')" \
+	"$(py 'edit("up.sh", "echo \"v0.1.1 7384897fff61738cfa9dbbe54c24061dbe65251b\" ;;", "echo \"main\" ;;")')" \
 	"keyryx is not pinned to a commit"
 
 run_case "keyryx-is-per-run: no custody start to judge" fail \

@@ -93,6 +93,9 @@ jobs:
       - name: the bus directory stays this user's
         run: ./scripts/bus-is-operator-owned.sh
 
+      - name: the demo runs after the planes that answer it
+        run: ./scripts/demo-runs-after-its-planes.sh
+
       # Last, because it mutates tracked files and restores them. It needs a
       # clean tree and says so plainly, so it also reports any earlier step
       # that starts writing into the checkout.

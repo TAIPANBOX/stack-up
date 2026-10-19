@@ -1633,6 +1633,46 @@ run_case "cloud-key-is-not-printed: printing the key file's path is not a fault"
 	'./scripts/cloud-key-is-not-printed.sh' \
 	"$(py 'edit("up.sh", "log \"events:  $EVENTS_DIR\"", "log \"events:  $EVENTS_DIR\"\nlog \"cloud key file: $CLOUD_KEY_FILE\"")')"
 
+# invariant 27: the demo's calls are made after the planes that answer them. Both
+# faults it was written for left the stand up and the demo answering nothing.
+run_case "demo-runs-after-its-planes: the Cloud starts after the gateway" fail \
+	'./scripts/demo-runs-after-its-planes.sh' \
+	"$(py 'edit("up.sh", "  \"$CLOUD_BIN\" > \"$LOGS_DIR/cloud.log\" 2>&1 &\n", "  true > \"$LOGS_DIR/cloud.log\" 2>&1 &\n")
+edit("up.sh", "register gateway \"$!\" INT\n", "register gateway \"$!\" INT\n\"$CLOUD_BIN\" > \"$LOGS_DIR/cloud.log\" 2>&1 &\n")')" \
+	"after the gateway on line"
+
+run_case "demo-runs-after-its-planes: the gateway starts before the Cloud answers" fail \
+	'./scripts/demo-runs-after-its-planes.sh' \
+	"$(py 'edit("up.sh", "wait_health cloud \"$CLOUD_PORT\" \"$!\" || die \"cloud did not come up.\"\n", "")
+edit("up.sh", "register gateway \"$!\" INT\n", "register gateway \"$!\" INT\nwait_health cloud \"$CLOUD_PORT\" \"$!\" || die \"cloud did not come up.\"\n")')" \
+	"'wait_health cloud' is on line"
+
+run_case "demo-runs-after-its-planes: the demo runs before wardryx answers" fail \
+	'./scripts/demo-runs-after-its-planes.sh' \
+	"$(py 'edit("up.sh", "  # demo_traffic runs below, once the policy plane answers: see after wardryx.\n", "  demo_traffic\n")
+edit("up.sh", "if [ \"$NO_DEMO\" -eq 0 ]; then\n  demo_traffic\nfi\n", "")')" \
+	"before 'wait_health wardryx'"
+
+run_case "demo-runs-after-its-planes: the demo runs twice" fail \
+	'./scripts/demo-runs-after-its-planes.sh' \
+	"$(py 'edit("up.sh", "  # demo_traffic runs below, once the policy plane answers: see after wardryx.\n", "  demo_traffic\n")')" \
+	"called 2 times"
+
+run_case "demo-runs-after-its-planes: the demo runs after idryx starts" fail \
+	'./scripts/demo-runs-after-its-planes.sh' \
+	"$(py 'edit("up.sh", "if [ \"$NO_DEMO\" -eq 0 ]; then\n  demo_traffic\nfi\n", "")
+edit("up.sh", "  register idryx \"$!\" TERM\n", "  register idryx \"$!\" TERM\n  demo_traffic\n")')" \
+	"after idryx starts"
+
+run_case "demo-runs-after-its-planes: no demo call at all" fail \
+	'./scripts/demo-runs-after-its-planes.sh' \
+	"$(py 'edit("up.sh", "if [ \"$NO_DEMO\" -eq 0 ]; then\n  demo_traffic\nfi\n", "")')" \
+	"measured nothing"
+
+run_case "demo-runs-after-its-planes: a comment that names the call is not a call" pass \
+	'./scripts/demo-runs-after-its-planes.sh' \
+	"$(py 'edit("up.sh", "  # demo_traffic runs below, once the policy plane answers: see after wardryx.\n", "  # demo_traffic\n")')"
+
 echo
 if [ -n "$(git status --porcelain)" ]; then
 	printf 'FAIL: this script left the tree dirty, so it cannot be trusted about anything above\n'

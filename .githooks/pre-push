@@ -55,6 +55,7 @@ step "features are bound" "./scripts/features-are-bound.sh"
 step "refusals keep their exit status" "./scripts/die-keeps-its-exit-status.sh"
 step "demo issuer's trusted line is unbound" "./scripts/demo-issuer-is-unbound.sh"
 step "bus directory stays this user's" "./scripts/bus-is-operator-owned.sh"
+step "demo runs after the planes that answer it" "./scripts/demo-runs-after-its-planes.sh"
 
 echo
 if [ "$fail" -ne 0 ]; then

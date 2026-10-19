@@ -1763,7 +1763,7 @@ run_case "pins-are-release-tags: --from-main is not a flag any more" fail \
 
 run_case "pins-are-release-tags: --from-main no longer says it is not a release" fail \
 	'./scripts/pins-are-release-tags.sh' \
-	"$(py 'edit("up.sh", "NOT the pinned release tags", "the pinned release tags")')" \
+	"$(py 'edit("up.sh", "checkouts, NOT the pinned release tags", "checkouts, the pinned release tags")')" \
 	"does not say it is not the pinned release"
 
 run_case "pins-are-release-tags: the pin table is renamed away" fail \

@@ -134,7 +134,7 @@ printf '%s\n' "$pinned_body" | grep -F -- '= "$commit" ] ||' | grep -q 'return 1
 # 5. --from-main is a flag, and it says the build is not the pinned release.
 grep -qF -- '--from-main) FROM_MAIN=1 ;;' up.sh \
   || problem "--from-main is not a flag (--from-main) FROM_MAIN=1 ;;)"
-grep -qF -- 'NOT the pinned release' up.sh \
+grep -qF -- 'checkouts, NOT the pinned release' up.sh \
   || problem "--from-main does not say it is not the pinned release"
 
 if [ "$problems" -ne 0 ]; then

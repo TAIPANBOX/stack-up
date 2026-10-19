@@ -91,7 +91,7 @@ grep -qF '"$KEYRYX_DIR/trailryx.kid"' up.sh || problem "the pin is not kept in \
 
 # 4. the rotation is explicit, and it needs keyryx.
 grep -qE -- '--repin-record-key\) REPIN_RECORD_KEY=1 ;;' up.sh || problem "--repin-record-key is not a flag that sets REPIN_RECORD_KEY=1"
-grep -qF -- '--repin-record-key needs keyryx' up.sh || problem "--repin-record-key is not refused without keyryx"
+grep -qF -- 'stack-up: --repin-record-key needs keyryx, and --without-keyryx turns keyryx off' up.sh || problem "--repin-record-key is not refused without keyryx"
 
 # 5. the signer and the pin travel together.
 seal_body="$(fn_code up.sh seal_node)"

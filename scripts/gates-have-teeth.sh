@@ -121,11 +121,12 @@ run_case() {
 		local key base_out
 		key="$baseline_dir/$(printf '%s' "$gate" | cksum | tr -d ' ')"
 		if [ ! -f "$key" ]; then
-			if eval "$gate" >/dev/null 2>&1; then printf 'green' >"$key"; else printf 'red' >"$key"; fi
+			if eval "$gate" >"$key.out" 2>&1; then printf 'green' >"$key"; else printf 'red' >"$key"; fi
 		fi
 		base_out="$(cat "$key")"
 		if [ "$base_out" = red ]; then
 			printf 'UNJUDGEABLE  %s\n             the gate is already failing on a clean tree, so neither a\n             failure nor a pass after the mutation would prove anything\n' "$name"
+			sed -n '1,4p' "$key.out" | sed 's/^/             the baseline run said: /'
 			failures=$((failures + 1))
 			return
 		fi

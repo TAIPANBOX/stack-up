@@ -5,7 +5,7 @@ your own machine, natively, with no Docker, and look at it in a browser.
 The stack's home on the web is [it-rat.com](https://it-rat.com).
 
 One command builds (or reuses) the service binaries from source, starts them on
-a fixed loopback port map, waits for each to report healthy, and prints a
+a fixed loopback port map, waits for each to report healthy, and names a
 one-click link to the money-plane dashboard. Press Ctrl-C and it stops cleanly,
 with no orphaned processes.
 
@@ -21,10 +21,13 @@ cd stack-up
 ./up.sh
 ```
 
-Then open the link it prints (something like
-`http://127.0.0.1:3000/?base=http://127.0.0.1:8080&key=<this run's key>`) and
-you are looking at your own local money plane. The key is minted fresh on every
-run and printed once in the summary as `cloud key:`.
+Then open the dashboard link the summary prints (`http://127.0.0.1:3000/?base=http://127.0.0.1:8080`).
+The key is not in that link. The summary names the file that holds the
+key-bearing link, `~/.stack-up/dashboard-link`, and the one line that opens it.
+The key is minted fresh on every run and held in `~/.stack-up/cloud-key`
+(mode 0600). It is never printed, so it stays out of your terminal history and
+out of the dashboard's server log (the key rides in the link's `#key=` fragment,
+which a browser never sends to a server).
 
 ## What it starts
 
@@ -607,10 +610,10 @@ presented as real, and off by default. `--no-demo` skips it exactly like it
 skips the short seed.
 
 To push your own data, POST call records to cloud with the key the summary
-printed as `cloud key:`:
+names, held in `~/.stack-up/cloud-key` (mode 0600):
 
 ```sh
-CLOUD_KEY=<the cloud key ./up.sh printed>
+CLOUD_KEY=$(cat ~/.stack-up/cloud-key)
 curl -X POST http://127.0.0.1:8080/v1/ingest \
   -H "authorization: Bearer $CLOUD_KEY" \
   -H 'content-type: application/json' \
@@ -956,8 +959,8 @@ line up numerically - that is expected, not a bug.
 - Every service binds to loopback only. Nothing is exposed off your machine.
 - `cloud` runs with one key minted fresh for each run
   (`TOKENFUSE_CLOUD_KEYS=<key>:default:admin`). The gateway, the demo seed and
-  the dashboard link use the same key, and the summary prints it once as
-  `cloud key:`. To use a key of your own, export `STACK_UP_CLOUD_KEY` (16 to 128
+  the dashboard link use the same key. It is held in `~/.stack-up/cloud-key`
+  (mode 0600) and never printed; the summary names that file. To use a key of your own, export `STACK_UP_CLOUD_KEY` (16 to 128
   characters from `A-Z a-z 0-9 . _ ~ -`; anything else is refused before
   anything is built). It is an admin key on a **local sandbox** and nothing
   else. Do not run this on a host anything else can reach.

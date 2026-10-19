@@ -218,6 +218,10 @@ if [ -n "$KEY_VAR" ]; then
         devkey) continue ;;
         %s)
           if grep -qE "\"\\\$\\{?${KEY_VAR}\\}?\"" <<<"$text"; then continue; fi ;;
+        # The key read from its 0600 file (invariant 26): the summary's curl hint
+        # passes $(cat FILE), and not-printed.sh holds FILE to be written from the key.
+        "\$(cat")
+          if grep -qE "\"[$][{]?${KEY_VAR}_FILE[}]?\"" <<<"$text"; then continue; fi ;;
       esac
       printf 'up.sh:%s: a use of the cloud'"'"'s credential presents %s, not this run'"'"'s key ($%s).\n' "$ln" "$tok" "$KEY_VAR" >&2
       problems=$(( problems + 1 ))

@@ -1523,7 +1523,7 @@ run_case "keyryx-is-per-run: the witness alerts go onto the shared bus" fail \
 
 run_case "keyryx-is-per-run: the pin is a branch name, not a commit" fail \
 	'./scripts/keyryx-is-per-run.sh' \
-	"$(py 'edit("up.sh", "KEYRYX_COMMIT=\"e87afc6e93e711191442d63d83abd84dbbcb19d6\"", "KEYRYX_COMMIT=\"main\"")')" \
+	"$(py 'edit("up.sh", "KEYRYX_COMMIT=\"7384897fff61738cfa9dbbe54c24061dbe65251b\"", "KEYRYX_COMMIT=\"main\"")')" \
 	"keyryx is not pinned to a commit"
 
 run_case "keyryx-is-per-run: no custody start to judge" fail \
@@ -1538,6 +1538,49 @@ run_case "keyryx-is-per-run: a log line that names the root key file is not a fa
 run_case "keyryx-is-per-run: a comment that names the root key is not a fault" pass \
 	'./scripts/keyryx-is-per-run.sh' \
 	"$(py 'edit("up.sh", "  log \"starting the keyryx witness", "  # $KEYRYX_CUSTODY_ROOT_KEY is never logged or put on a command line.\n  log \"starting the keyryx witness")')"
+
+run_case "demo-issuer-is-unbound: the marker is dropped from the demo line" fail \
+	'./scripts/demo-issuer-is-unbound.sh' \
+	"$(py 'edit("up.sh", "$DELEG_DIR/idp.jwks.json|unbound\"", "$DELEG_DIR/idp.jwks.json\"")')" \
+	"does not end in |unbound"
+
+run_case "demo-issuer-is-unbound: no demo issuer line to judge" fail \
+	'./scripts/demo-issuer-is-unbound.sh' \
+	"$(py 'edit("up.sh", "https://idp.stack-up.local|http://127.0.0.1", "https://idp.stack-up.example|http://127.0.0.1")')" \
+	"nothing was measured"
+
+run_case "demo-issuer-is-unbound: the marker on an operator's own issuer line" fail \
+	'./scripts/demo-issuer-is-unbound.sh' \
+	"$(py 'edit("up.sh", "  VOUCHRYX_EVENTS_PATH=\"$EVENTS_DIR/vouchryx.ndjson\" \\\n", "  VOUCHRYX_WORKLOAD_ISSUERS=\"https://agents.example|http://127.0.0.1:4310|/dev/null|unbound\" \\\n  VOUCHRYX_EVENTS_PATH=\"$EVENTS_DIR/vouchryx.ndjson\" \\\n")')" \
+	"carries |unbound on a line that is not the demo issuer's"
+
+run_case "demo-issuer-is-unbound: a comment that shows the demo line is not a fault" pass \
+	'./scripts/demo-issuer-is-unbound.sh' \
+	"$(py 'edit("up.sh", "  log \"starting vouchryx on :", "  # the demo line is https://idp.stack-up.local|http://127.0.0.1:4310|<jwks>|unbound\n  log \"starting vouchryx on :")')"
+
+run_case "bus-is-operator-owned: a chown on the bus directory" fail \
+	'./scripts/bus-is-operator-owned.sh' \
+	"$(py 'edit("up.sh", "mkdir -p \"$EVENTS_DIR\" \"$LOGS_DIR\"", "sudo chown root \"$EVENTS_DIR\"\nmkdir -p \"$EVENTS_DIR\" \"$LOGS_DIR\"")')" \
+	"changes who owns a file"
+
+run_case "bus-is-operator-owned: the bus directory is never made" fail \
+	'./scripts/bus-is-operator-owned.sh' \
+	"$(py 'edit("up.sh", "\nmkdir -p \"$EVENTS_DIR\" \"$LOGS_DIR\"", "\n# mkdir -p \"$EVENTS_DIR\" \"$LOGS_DIR\"")')" \
+	"never makes"
+
+run_case "bus-is-operator-owned: the bus directory is made after a service starts" fail \
+	'./scripts/bus-is-operator-owned.sh' \
+	"$(py 'edit("up.sh", "\nmkdir -p \"$EVENTS_DIR\" \"$LOGS_DIR\"", "\nregister early \"$!\" TERM\nmkdir -p \"$EVENTS_DIR\" \"$LOGS_DIR\"")')" \
+	"after a service starts"
+
+run_case "bus-is-operator-owned: routines.sh hands the bus to a group" fail \
+	'./scripts/bus-is-operator-owned.sh' \
+	"$(py 'edit("routines.sh", "EVENTS_DIR=\"$STACK_UP_HOME/events\"\n", "EVENTS_DIR=\"$STACK_UP_HOME/events\"\nchgrp staff \"$EVENTS_DIR\"\n")')" \
+	"changes who owns a file"
+
+run_case "bus-is-operator-owned: a comment that says no sudo or chown is not a fault" pass \
+	'./scripts/bus-is-operator-owned.sh' \
+	"$(py 'edit("up.sh", "\nmkdir -p \"$EVENTS_DIR\" \"$LOGS_DIR\"", "\n# no sudo, chown or chgrp here: this user makes the bus directory and owns it.\nmkdir -p \"$EVENTS_DIR\" \"$LOGS_DIR\"")')"
 
 echo
 if [ -n "$(git status --porcelain)" ]; then

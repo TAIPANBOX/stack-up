@@ -809,7 +809,7 @@ each key to a file that only your user can read. No key value is printed, logged
 put on a command line; the summary names no key. A new run starts with new keys, so an
 approval granted in an earlier run does not verify in this one.
 
-keyryx is built from the commit that the tag `v0.1.0` names and nothing else. That tag
+keyryx is built from the commit that the tag `v0.1.1` names and nothing else. That tag
 publishes a container image, not a binary, and this launcher runs no containers, so
 the clone is refused unless it is that commit. The pin is two lines near the top of
 `up.sh` (`KEYRYX_TAG` and `KEYRYX_COMMIT`); moving it is one change.

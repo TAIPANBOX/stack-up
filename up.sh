@@ -239,12 +239,12 @@ KEYRYX_CUSTODY_ROOT_KEY_PATH="$KEYRYX_DIR/custody-root.key"
 KEYRYX_WITNESS_ROOT_KEY_PATH="$KEYRYX_DIR/witness-root.key"
 KEYRYX_POLICY_PATH="$KEYRYX_DIR/policy.json"
 KEYRYX_WARDRYX_KEY_PATH="$KEYRYX_DIR/wardryx.key"
-# keyryx is built from this tag's commit and nothing else. v0.1.0 publishes a
+# keyryx is built from this tag's commit and nothing else. v0.1.1 publishes a
 # container image and no binary, and this launcher runs no containers, so the
 # commit the tag names is what gets built, and the clone is refused unless it is
 # that commit. Moving keyryx is changing these two lines, nothing else.
-KEYRYX_TAG="v0.1.0"
-KEYRYX_COMMIT="e87afc6e93e711191442d63d83abd84dbbcb19d6"
+KEYRYX_TAG="v0.1.1"
+KEYRYX_COMMIT="7384897fff61738cfa9dbbe54c24061dbe65251b"
 # Where a build lands before it is installed, so nothing is ever compiled
 # directly onto a path something else may be reading or executing.
 BUILD_DIR="$STACK_UP_HOME/build"
@@ -1408,6 +1408,10 @@ if [ "$TYPED_RISK_SIGNAL" -eq 1 ]; then
     && die "port $TYPRYX_PROXY_PORT (typryx wardryx-proxy) is already in use."
 fi
 
+# The bus directory is made here, as this user, before any service starts. Every
+# writer this launcher starts runs as this user, and agent-stack-go v2 creates a
+# stream only in a directory its own uid owns (CLAUDE.md invariant 25). Nothing
+# below may chown, chgrp or sudo it: scripts/bus-is-operator-owned.sh holds that.
 mkdir -p "$EVENTS_DIR" "$LOGS_DIR" "$PIDS_DIR" "$REPOS_DIR" "$MARKERS_DIR" "$BUILD_DIR"
 
 # Hand the trust domain to the scheduled seal. routines.sh reads this file at
@@ -1645,10 +1649,15 @@ if [ "$WITH_DELEGATION" -eq 1 ]; then
   # environment, never through a named variable of this script's own: nothing
   # here logs it, and nothing here needs to hold it a moment longer than the
   # one assignment that hands it to vouchryx.
+  #
+  # The demo issuer's line ends in `|unbound`. vouchryx v0.5.0 and later refuse a
+  # subject token with no cnf.jkt unless its issuer line says so, and the demo IdP
+  # sends such tokens (vouchryx-demo keygen says so). This marker is the demo's
+  # alone; scripts/demo-issuer-is-unbound.sh holds it (CLAUDE.md invariant 24).
   VOUCHRYX_ADDR="127.0.0.1:$VOUCHRYX_PORT" \
   VOUCHRYX_ISSUER="http://127.0.0.1:$VOUCHRYX_PORT" \
   VOUCHRYX_SIGNING_KEY="$DELEG_DIR/signing.pem" \
-  VOUCHRYX_TRUSTED_ISSUERS="https://idp.stack-up.local|http://127.0.0.1:$VOUCHRYX_PORT|$DELEG_DIR/idp.jwks.json" \
+  VOUCHRYX_TRUSTED_ISSUERS="https://idp.stack-up.local|http://127.0.0.1:$VOUCHRYX_PORT|$DELEG_DIR/idp.jwks.json|unbound" \
   VOUCHRYX_EVENTS_PATH="$EVENTS_DIR/vouchryx.ndjson" \
   VOUCHRYX_REVOCATIONS_PATH="$DELEG_DIR/revocations.ndjson" \
   VOUCHRYX_REVOKE_KEYS="$(cat "$DELEG_DIR/revoke.key")" \

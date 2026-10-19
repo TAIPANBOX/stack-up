@@ -47,6 +47,8 @@ bash -n up.sh && bash -n down.sh && bash -n routines.sh
 ./scripts/manifest-is-true.sh
 ./scripts/features-are-bound.sh
 ./scripts/die-keeps-its-exit-status.sh
+./scripts/demo-issuer-is-unbound.sh
+./scripts/bus-is-operator-owned.sh
 ./scripts/gates-have-teeth.sh   # invariant 6; needs a clean tree
 ```
 
@@ -571,7 +573,7 @@ building here and the thing that most often gets skipped.
     and an independent witness of the record, both off every request path, with wardryx's approvals
     signed by custody and not by a shared secret. `@claude 2026-10-18`: the shape here is my reading of
     that decision for a launcher, not a stated decision. `up.sh` builds keyryx from the commit that
-    `KEYRYX_TAG` names, refused unless the clone is `KEYRYX_COMMIT`, because keyryx v0.1.0 publishes a
+    `KEYRYX_TAG` names, refused unless the clone is `KEYRYX_COMMIT`, because keyryx v0.1.1 publishes a
     container image and no binary and this launcher runs no containers. It mints three values per run
     above the first custody start, each refused when empty: the custody root key and the witness root
     key (`rand_hex 32`, each in its own 0600 file under `$STACK_UP_HOME/keyryx`) and the bearer key
@@ -593,9 +595,34 @@ building here and the thing that most often gets skipped.
     wardryx start. 18 fault cases and 2 pass cases in `gates-have-teeth.sh`;
     `features/the-keyryx-custody-and-witness-run-per-run.feature`, 7 scenarios. Not covered: that a running
     custody refuses a consumer it does not know, that the witness finds a rewrite (keyryx's own tests,
-    keyryx v0.1.0 `internal/witness`, and its built-binary test), and that a process keeps its key from
+    keyryx v0.1.1 `internal/witness`, and its built-binary test), and that a process keeps its key from
     the same user (`/proc/<pid>/environ` and argv are readable by that user). The launcher runs as one
     OS user, so custody and the witness are separated by process and directory only, not by uid.)*
+
+24. **The demo issuer's trusted line ends in `|unbound`, and no other line does.**
+    `@claude 2026-10-19`: vouchryx v0.5.0 refuses a subject token with no `cnf.jkt` unless its issuer
+    line ends in `|unbound` (vouchryx `internal/config`, `loadTrusted`). The demo IdP sends such tokens,
+    so `up.sh` writes the marker on its one trusted-issuer line, and an operator's own issuer never gets
+    it. `@measured` vouchryx `main` at `a917865`, built from source into a scratch directory and started
+    with the trusted line `up.sh` writes, the README's `vouchryx-demo exchange` run against it, 2026-10-19:
+    with the marker absent the exchange returned HTTP 400 `invalid_grant`; with it present the exchange
+    returned a token, and a revocation of the subject survived a restart of vouchryx on the same
+    revocations path.
+    *(gate: `scripts/demo-issuer-is-unbound.sh`, 4 cases in `gates-have-teeth.sh`. Not covered: the
+    gateway rows of the README loop, a call through the gateway with the token and the 401 after the
+    revocation, which need a built tokenfuse and were not run.)*
+
+25. **The bus directory is made by this user, before any service starts, and nothing in the launcher
+    hands it to another owner.** `@claude 2026-10-19`: agent-stack-go v2 creates an event stream only in
+    a directory its own uid owns, and makes the file 0640 (`event/create.go`, `openAppend`). Every writer
+    this launcher starts runs as the operator, so the directory `mkdir -p` makes is one each writer owns.
+    A `sudo`, `chown` or `chgrp` on it would make the next writer refuse to create its stream, and that
+    refusal shows only in the writer's own log. `@measured` vouchryx `main` at `a917865`, started on a
+    directory `mkdir -p` made, 2026-10-19: it wrote `vouchryx.ndjson` as `-rw-r-----`, owned by the operator.
+    *(gate: `scripts/bus-is-operator-owned.sh`, 5 cases in `gates-have-teeth.sh`. Not covered: the refusal
+    itself, a writer asked to create a stream in a directory another uid owns, which needs a second user;
+    and the 0640 mode of the other Go writers (wardryx, scopyx, costcrew, typryx, keyryx, agent-conform),
+    which were not run here.)*
 
 An approved architecture decision is **not finished** until it is two things: a
 numbered invariant in this file, and a gate in a script if it can be checked
@@ -607,7 +634,7 @@ structurally. Until then it is a document, and documents do not stop code.
   bodies. Use a comma, a colon, parentheses, or a short hyphen.
 - A scenario in `features/` is bound by a `# -> gates-have-teeth.sh "<case>"`
   line under it, and `scripts/features-are-bound.sh` holds the binding both ways.
-- This launcher pins no tag (it builds from `main`), so a release's new setting is
+- This launcher pins no release tag except keyryx's (`KEYRYX_TAG`, invariant 23). Everything else builds from `main`, so a release's new setting is
   held by checking at launch that the binary names it, never by a version number.
 - Nothing paid or metered gets enabled without telling the user first and
   getting agreement.

@@ -84,6 +84,12 @@ jobs:
       - name: a refusal leaves with its status, not 0
         run: ./scripts/die-keeps-its-exit-status.sh
 
+      - name: the demo issuer's trusted line is unbound
+        run: ./scripts/demo-issuer-is-unbound.sh
+
+      - name: the bus directory stays this user's
+        run: ./scripts/bus-is-operator-owned.sh
+
       # Last, because it mutates tracked files and restores them. It needs a
       # clean tree and says so plainly, so it also reports any earlier step
       # that starts writing into the checkout.

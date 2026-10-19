@@ -1852,12 +1852,12 @@ run_case "record-is-signed-by-default: the record-seal credential is minted ever
 
 run_case "record-is-signed-by-default: trailryx-root is not an ES384 key" fail \
 	'./scripts/record-is-signed-by-default.sh' \
-	"$(py 'edit("up.sh", "{\"name\": \"trailryx-root\", \"alg\": \"ES384\"}", "{\"name\": \"trailryx-root\", \"alg\": \"ES256\"}")')" \
+	"$(py 'edit("up.sh", "\x7b\"name\": \"trailryx-root\", \"alg\": \"ES384\"\x7d", "\x7b\"name\": \"trailryx-root\", \"alg\": \"ES256\"\x7d")')" \
 	"does not declare trailryx-root as an ES384 key"
 
 run_case "record-is-signed-by-default: record-seal is granted more than sign" fail \
 	'./scripts/record-is-signed-by-default.sh' \
-	"$(py 'edit("up.sh", "\"grants\": {\"trailryx-root\": [\"sign\"]}}]}", "\"grants\": {\"trailryx-root\": [\"sign\", \"delegate\"]}}]}")')" \
+	"$(py 'edit("up.sh", "\"grants\": \x7b\"trailryx-root\": [\"sign\"]\x7d\x7d]\x7d", "\"grants\": \x7b\"trailryx-root\": [\"sign\", \"delegate\"]\x7d\x7d]\x7d")')" \
 	"is not granted sign on trailryx-root alone"
 
 run_case "record-is-signed-by-default: the opt-out does not say the record pack is unsigned" fail \

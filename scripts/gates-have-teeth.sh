@@ -121,11 +121,12 @@ run_case() {
 		local key base_out
 		key="$baseline_dir/$(printf '%s' "$gate" | cksum | tr -d ' ')"
 		if [ ! -f "$key" ]; then
-			if eval "$gate" >/dev/null 2>&1; then printf 'green' >"$key"; else printf 'red' >"$key"; fi
+			if eval "$gate" >"$key.out" 2>&1; then printf 'green' >"$key"; else printf 'red' >"$key"; fi
 		fi
 		base_out="$(cat "$key")"
 		if [ "$base_out" = red ]; then
 			printf 'UNJUDGEABLE  %s\n             the gate is already failing on a clean tree, so neither a\n             failure nor a pass after the mutation would prove anything\n' "$name"
+			sed -n '1,4p' "$key.out" | sed 's/^/             the baseline run said: /'
 			failures=$((failures + 1))
 			return
 		fi
@@ -704,10 +705,10 @@ run_case "cloud-key-is-per-run: the demo seed posts with the old literal" fail \
 	"$(py 'edit("up.sh", "-H \"Authorization: Bearer $CLOUD_KEY\"", "-H \"Authorization: Bearer devkey\"")')" \
 	"still presents devkey"
 
-run_case "cloud-key-is-per-run: the dashboard link carries another key" fail \
-	'./scripts/cloud-key-is-per-run.sh' \
-	"$(py 'edit("up.sh", "&key=$CLOUD_KEY\"", "&key=$OTHER_KEY\"")')" \
-	"not this run's key"
+run_case "cloud-key-is-not-printed: the dashboard link carries another key" fail \
+	'./scripts/cloud-key-is-not-printed.sh' \
+	"$(py 'edit("up.sh", "\"$DASH_URL#key=$CLOUD_KEY\"", "\"$DASH_URL#key=$OTHER_KEY\"")')" \
+	"no link carries the Cloud key after #key="
 
 run_case "cloud-key-is-per-run: the summary names bearer devkey again" fail \
 	'./scripts/cloud-key-is-per-run.sh' \
@@ -1581,6 +1582,96 @@ run_case "bus-is-operator-owned: routines.sh hands the bus to a group" fail \
 run_case "bus-is-operator-owned: a comment that says no sudo or chown is not a fault" pass \
 	'./scripts/bus-is-operator-owned.sh' \
 	"$(py 'edit("up.sh", "\nmkdir -p \"$EVENTS_DIR\" \"$LOGS_DIR\"", "\n# no sudo, chown or chgrp here: this user makes the bus directory and owns it.\nmkdir -p \"$EVENTS_DIR\" \"$LOGS_DIR\"")')"
+
+# invariant 26: the Cloud key is in no query string and on no printed line, and
+# the files that hold it are made 0600.
+run_case "cloud-key-is-not-printed: the key goes back into the dashboard query string" fail \
+	'./scripts/cloud-key-is-not-printed.sh' \
+	"$(py 'edit("up.sh", "\"$DASH_URL#key=$CLOUD_KEY\"", "\"$DASH_URL&key=$CLOUD_KEY\"")')" \
+	"query string"
+
+run_case "cloud-key-is-not-printed: the link with the key becomes the printed link" fail \
+	'./scripts/cloud-key-is-not-printed.sh' \
+	"$(py 'edit("up.sh", "DASH_URL=\"http://127.0.0.1:$DASH_PORT/?base=http://127.0.0.1:$CLOUD_PORT\"", "DASH_URL=\"http://127.0.0.1:$DASH_PORT/?base=http://127.0.0.1:$CLOUD_PORT#key=$CLOUD_KEY\"")')" \
+	"prints \$DASH_URL, which holds the Cloud key"
+
+run_case "cloud-key-is-not-printed: the cloud key is printed on the summary line" fail \
+	'./scripts/cloud-key-is-not-printed.sh' \
+	"$(py 'edit("up.sh", "cloud key: in $CLOUD_KEY_FILE (mode 0600; minted fresh this run", "cloud key: $CLOUD_KEY (mode 0600; minted fresh this run")')" \
+	"prints \$CLOUD_KEY, which holds the Cloud key"
+
+run_case "cloud-key-is-not-printed: the API hint prints the key itself" fail \
+	'./scripts/cloud-key-is-not-printed.sh' \
+	"$(py 'edit("up.sh", "\"$CLOUD_KEY_FILE\" \"$CLOUD_PORT\"", "\"$CLOUD_KEY\" \"$CLOUD_PORT\"")')" \
+	"prints \$CLOUD_KEY, which holds the Cloud key"
+
+run_case "cloud-key-is-not-printed: the key file is written without chmod 600" fail \
+	'./scripts/cloud-key-is-not-printed.sh' \
+	"$(py 'edit("up.sh", "|| ! chmod 600 \"$CLOUD_KEY_FILE\"; then", "|| ! true; then")')" \
+	"without umask 077 and chmod 600"
+
+run_case "cloud-key-is-not-printed: the dashboard link is written under the default umask" fail \
+	'./scripts/cloud-key-is-not-printed.sh' \
+	"$(py 'edit("up.sh", "umask 077; printf \x27%s\\n\x27 \"$DASH_URL", "printf \x27%s\\n\x27 \"$DASH_URL")')" \
+	"without umask 077 and chmod 600"
+
+run_case "cloud-key-is-not-printed: the dashboard link is written without the key" fail \
+	'./scripts/cloud-key-is-not-printed.sh' \
+	"$(py 'edit("up.sh", "\"$DASH_URL#key=$CLOUD_KEY\" > \"$DASH_LINK_FILE\"", "\"$DASH_URL\" > \"$DASH_LINK_FILE\"")')" \
+	"fewer than two files receive the Cloud key"
+
+run_case "cloud-key-is-not-printed: the key is never minted" fail \
+	'./scripts/cloud-key-is-not-printed.sh' \
+	"$(py 'edit("up.sh", "CLOUD_KEY=\"${STACK_UP_CLOUD_KEY:-$(rand_hex 16)}\"", "CLOUD_KEYX=\"${STACK_UP_CLOUD_KEY:-$(rand_hex 16)}\"")')" \
+	"mints no CLOUD_KEY"
+
+run_case "cloud-key-is-not-printed: a comment that shows the forbidden form is not a fault" pass \
+	'./scripts/cloud-key-is-not-printed.sh' \
+	"$(py 'edit("up.sh", "  log \"open the dashboard at this link", "  # \"$DASH_URL&key=$CLOUD_KEY\" is the form invariant 26 forbids.\n  log \"open the dashboard at this link")')"
+
+run_case "cloud-key-is-not-printed: printing the key file's path is not a fault" pass \
+	'./scripts/cloud-key-is-not-printed.sh' \
+	"$(py 'edit("up.sh", "log \"events:  $EVENTS_DIR\"", "log \"events:  $EVENTS_DIR\"\nlog \"cloud key file: $CLOUD_KEY_FILE\"")')"
+
+# invariant 27: the demo's calls are made after the planes that answer them. Both
+# faults it was written for left the stand up and the demo answering nothing.
+run_case "demo-runs-after-its-planes: the Cloud starts after the gateway" fail \
+	'./scripts/demo-runs-after-its-planes.sh' \
+	"$(py 'edit("up.sh", "  \"$CLOUD_BIN\" > \"$LOGS_DIR/cloud.log\" 2>&1 &\n", "  true > \"$LOGS_DIR/cloud.log\" 2>&1 &\n")
+edit("up.sh", "register gateway \"$!\" INT\n", "register gateway \"$!\" INT\n\"$CLOUD_BIN\" > \"$LOGS_DIR/cloud.log\" 2>&1 &\n")')" \
+	"after the gateway on line"
+
+run_case "demo-runs-after-its-planes: the gateway starts before the Cloud answers" fail \
+	'./scripts/demo-runs-after-its-planes.sh' \
+	"$(py 'edit("up.sh", "wait_health cloud \"$CLOUD_PORT\" \"$!\" || die \"cloud did not come up.\"\n", "")
+edit("up.sh", "register gateway \"$!\" INT\n", "register gateway \"$!\" INT\nwait_health cloud \"$CLOUD_PORT\" \"$!\" || die \"cloud did not come up.\"\n")')" \
+	"'wait_health cloud' is on line"
+
+run_case "demo-runs-after-its-planes: the demo runs before wardryx answers" fail \
+	'./scripts/demo-runs-after-its-planes.sh' \
+	"$(py 'edit("up.sh", "  # demo_traffic runs below, once the policy plane answers: see after wardryx.\n", "  demo_traffic\n")
+edit("up.sh", "if [ \"$NO_DEMO\" -eq 0 ]; then\n  demo_traffic\nfi\n", "")')" \
+	"before 'wait_health wardryx'"
+
+run_case "demo-runs-after-its-planes: the demo runs twice" fail \
+	'./scripts/demo-runs-after-its-planes.sh' \
+	"$(py 'edit("up.sh", "  # demo_traffic runs below, once the policy plane answers: see after wardryx.\n", "  demo_traffic\n")')" \
+	"called 2 times"
+
+run_case "demo-runs-after-its-planes: the demo runs after idryx starts" fail \
+	'./scripts/demo-runs-after-its-planes.sh' \
+	"$(py 'edit("up.sh", "if [ \"$NO_DEMO\" -eq 0 ]; then\n  demo_traffic\nfi\n", "")
+edit("up.sh", "  register idryx \"$!\" TERM\n", "  register idryx \"$!\" TERM\n  demo_traffic\n")')" \
+	"after idryx starts"
+
+run_case "demo-runs-after-its-planes: no demo call at all" fail \
+	'./scripts/demo-runs-after-its-planes.sh' \
+	"$(py 'edit("up.sh", "if [ \"$NO_DEMO\" -eq 0 ]; then\n  demo_traffic\nfi\n", "")')" \
+	"measured nothing"
+
+run_case "demo-runs-after-its-planes: a comment that names the call is not a call" pass \
+	'./scripts/demo-runs-after-its-planes.sh' \
+	"$(py 'edit("up.sh", "  # demo_traffic runs below, once the policy plane answers: see after wardryx.\n", "  # demo_traffic\n")')"
 
 echo
 if [ -n "$(git status --porcelain)" ]; then

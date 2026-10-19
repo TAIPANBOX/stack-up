@@ -1782,6 +1782,37 @@ CLOUD_KEY="${STACK_UP_CLOUD_KEY:-$(rand_hex 16)}"
 [ -n "$CLOUD_KEY" ] \
   || die "could not mint the cloud's key (no openssl, and /dev/urandom gave nothing); refusing to start a cloud that would authenticate nobody."
 
+# The key is written to a 0600 file and never printed (invariant 26). The
+# dashboard link and a curl by hand both read it from there. umask 077 first, so
+# the file is never world-readable between create and chmod.
+CLOUD_KEY_FILE="$STACK_UP_HOME/cloud-key"
+rm -f "$CLOUD_KEY_FILE"
+if ! ( umask 077; printf '%s\n' "$CLOUD_KEY" > "$CLOUD_KEY_FILE" ) \
+   || ! chmod 600 "$CLOUD_KEY_FILE"; then
+  die "could not write $CLOUD_KEY_FILE; refusing to start a stand whose cloud key nobody could read."
+fi
+
+# Before the gateway, and the order is not cosmetic. A gateway configured with a
+# control plane admits nothing a budget governs until it has read the Cloud's
+# money state (tokenfuse invariant 103, its seedgate.rs): until then every call
+# that carries a run id is refused 503 seed_pending in enforce. Started after
+# the gateway, the Cloud was not listening for the startup seed, and the demo's
+# calls landed in that gap (measured on a Linux bring-up 2026-10-19: all six
+# 503, the summary said the gateway answered nothing). The Cloud needs nothing
+# the gateway makes. scripts/demo-runs-after-its-planes.sh holds the order.
+# cloud: one key, this run's CLOUD_KEY, as org `default`, role `admin`, no site.
+# The dashboard link below carries the same key, so it still connects with one
+# click. TOKENFUSE_CLOUD_ALLOW_DEVKEY is NOT set: tokenfuse#380 removed the
+# fallback it enabled, and a cloud that sees it now refuses to start (exit 2).
+# A prefix assignment, so the key is in the cloud's environment and on no
+# command line.
+log "starting cloud on :$CLOUD_PORT (a key minted for this run)"
+PORT="$CLOUD_PORT" \
+TOKENFUSE_CLOUD_KEYS="$CLOUD_KEY:default:admin" \
+  "$CLOUD_BIN" > "$LOGS_DIR/cloud.log" 2>&1 &
+register cloud "$!" TERM
+wait_health cloud "$CLOUD_PORT" "$!" || die "cloud did not come up."
+
 # TOKENFUSE_MAX_RUN_BUDGET_USD (tokenfuse v1.5.0, invariant 73): the operator's
 # ceiling on the budget one run may be granted. A run's budget comes from the
 # header the AGENT sends (x-fuse-budget-usd), from a policy default or from the
@@ -1877,30 +1908,13 @@ fi
 register gateway "$!" INT
 wait_health gateway "$GATEWAY_PORT" "$!" || die "gateway did not come up."
 
-# cloud: one key, this run's CLOUD_KEY, as org `default`, role `admin`, no site.
-# The dashboard link below carries the same key, so it still connects with one
-# click. TOKENFUSE_CLOUD_ALLOW_DEVKEY is NOT set: tokenfuse#380 removed the
-# fallback it enabled, and a cloud that sees it now refuses to start (exit 2).
-# A prefix assignment, so the key is in the cloud's environment and on no
-# command line.
-log "starting cloud on :$CLOUD_PORT (a key minted for this run)"
-PORT="$CLOUD_PORT" \
-TOKENFUSE_CLOUD_KEYS="$CLOUD_KEY:default:admin" \
-  "$CLOUD_BIN" > "$LOGS_DIR/cloud.log" 2>&1 &
-register cloud "$!" TERM
-wait_health cloud "$CLOUD_PORT" "$!" || die "cloud did not come up."
-
 if [ "$NO_DEMO" -eq 0 ]; then
   if [ "$DEMO_FLEET" -eq 1 ]; then
     seed_demo_fleet
   else
     seed_demo
   fi
-  # After the seed, because the seed fills the dashboard and this fills the
-  # event bus, and the record plane below reads the bus. Both are part of the
-  # demonstration, so both are skipped by --no-demo together: a run that asked
-  # for no demo data must not get demo traffic through the back door.
-  demo_traffic
+  # demo_traffic runs below, once the policy plane answers: see after wardryx.
 fi
 
 # --------------------------------------------------------------------------
@@ -1908,6 +1922,7 @@ fi
 # --------------------------------------------------------------------------
 
 DASH_URL=""
+DASH_LINK_FILE=""
 if [ "$WANT_DASHBOARD" -eq 1 ]; then
   DASH_DIR="$TF_REPO/cloud/dashboard"
   DASH_OUT="$DASH_DIR/out"
@@ -1929,7 +1944,17 @@ if [ "$WANT_DASHBOARD" -eq 1 ] && [ -f "$DASH_OUT/index.html" ]; then
   python3 -m http.server "$DASH_PORT" --bind 127.0.0.1 --directory "$DASH_OUT" > "$LOGS_DIR/dashboard.log" 2>&1 &
   register dashboard "$!" TERM
   if wait_health dashboard "$DASH_PORT" "$!" / 20; then
-    DASH_URL="http://127.0.0.1:$DASH_PORT/?base=http://127.0.0.1:$CLOUD_PORT&key=$CLOUD_KEY"
+    DASH_URL="http://127.0.0.1:$DASH_PORT/?base=http://127.0.0.1:$CLOUD_PORT"
+    # The link with the key goes after #key=. A browser never sends a fragment to
+    # a server, so the key stays out of the dashboard's access log and the Referer
+    # (tokenfuse#469). It is written to a 0600 file and not printed (invariant 26).
+    DASH_LINK_FILE="$STACK_UP_HOME/dashboard-link"
+    rm -f "$DASH_LINK_FILE"
+    if ! ( umask 077; printf '%s\n' "$DASH_URL#key=$CLOUD_KEY" > "$DASH_LINK_FILE" ) \
+       || ! chmod 600 "$DASH_LINK_FILE"; then
+      warn "could not write $DASH_LINK_FILE; the dashboard runs, but its key-bearing link is not written. The key is in $CLOUD_KEY_FILE."
+      DASH_LINK_FILE=""
+    fi
   fi
 fi
 
@@ -2109,6 +2134,20 @@ YAML
   # The gateway above is wired to this PDP and fails closed on it, so a wardryx
   # that does not answer stops the stand here; the EXIT trap stops what started.
   wait_health wardryx "$WARDRYX_PORT" "$!" || die "wardryx did not come up; the gateway refuses every decision without it (TOKENFUSE_WARDRYX_FAILMODE=closed), so the stand stops. See $LOGS_DIR/wardryx.log."
+fi
+
+# The demo's calls through the gateway, after every plane that answers them and
+# before the planes that read what they leave. The gateway fails closed on
+# wardryx (TOKENFUSE_WARDRYX_FAILMODE=closed), so a call made before wardryx
+# listens is refused for want of a decision, not by the Breaker: measured on a
+# Linux bring-up 2026-10-19, all six refused that way. After the seed, because the
+# seed fills the dashboard and this fills the event bus, and idryx, the notifier
+# and the record plane below read the bus. Both are part of the demonstration, so
+# both are skipped by --no-demo together: a run that asked for no demo data must
+# not get demo traffic through the back door. scripts/demo-runs-after-its-planes.sh
+# holds the order.
+if [ "$NO_DEMO" -eq 0 ]; then
+  demo_traffic
 fi
 
 # --------------------------------------------------------------------------
@@ -2932,18 +2971,32 @@ if [ "${#TOOLS_INSTALLED[@]}" -gt 0 ]; then
   done
 fi
 echo
+# Nothing printed here carries the Cloud key (invariant 26). The link without
+# the key is printed; the link with it is in a 0600 file, and the file's path
+# and the one line that opens it are printed instead.
 if [ -n "$DASH_URL" ]; then
-  log "open the dashboard (one click, it remembers the connection):"
+  log "open the dashboard at this link (without its key; the key-bearing link is in a file, below):"
   printf '\033[1;32m  %s\033[0m\n' "$DASH_URL"
 else
-  log "no dashboard this run. Point a tool at the money-plane API:"
-  printf '  curl -H "Authorization: Bearer %s" http://127.0.0.1:%s/v1/summary\n' "$CLOUD_KEY" "$CLOUD_PORT"
+  log "no dashboard this run."
+fi
+if [ -n "$DASH_LINK_FILE" ]; then
+  if [ "$(uname -s)" = Darwin ]; then DASH_OPENER=open; else DASH_OPENER=xdg-open; fi
+  log "the link with its key is in $DASH_LINK_FILE (mode 0600). One line opens it:"
+  # shellcheck disable=SC2016
+  # The $(cat ...) is text for the operator to run, not an expansion here.
+  printf '  %s "$(cat %s)"\n' "$DASH_OPENER" "$DASH_LINK_FILE"
 fi
 echo
+log "the money-plane API takes the cloud key from its file, for example:"
+# shellcheck disable=SC2016
+# The $(cat ...) is text for the operator to run, not an expansion here.
+printf '  curl -H "Authorization: Bearer $(cat %s)" http://127.0.0.1:%s/v1/summary\n' "$CLOUD_KEY_FILE" "$CLOUD_PORT"
+echo
 if [ -n "${STACK_UP_CLOUD_KEY:-}" ]; then
-  log "cloud key: $CLOUD_KEY   (yours, from STACK_UP_CLOUD_KEY; admin on the cloud, held in its environment and the gateway's)"
+  log "cloud key: in $CLOUD_KEY_FILE (mode 0600; yours, from STACK_UP_CLOUD_KEY; admin on the cloud, held in its environment and the gateway's; not printed here)"
 else
-  log "cloud key: $CLOUD_KEY   (minted fresh this run, admin on the cloud; set STACK_UP_CLOUD_KEY to choose your own)"
+  log "cloud key: in $CLOUD_KEY_FILE (mode 0600; minted fresh this run, admin on the cloud; set STACK_UP_CLOUD_KEY to choose your own; not printed here)"
 fi
 log "events:  $EVENTS_DIR"
 log "logs:    $LOGS_DIR"

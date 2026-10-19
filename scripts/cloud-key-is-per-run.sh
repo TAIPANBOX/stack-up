@@ -25,8 +25,8 @@
 #    TOKENFUSE_CLOUD_KEYS as "$VAR:<org>:<role>...", a shell variable, never a
 #    literal and never empty.
 # 3. That variable is minted with rand_hex above the first gateway start (the
-#    gateway starts before the cloud and is handed the key at its start), with a
-#    refusal on an empty value right after it.
+#    gateway is handed the key at its start; the cloud starts before it since
+#    invariant 27), with a refusal on an empty value right after it.
 # 4. Every gateway start ("$GATEWAY_BIN" at the command position, the
 #    mcp-broker subcommand excluded as in the neighbouring gates) sets
 #    TOKENFUSE_CLOUD_KEY from the SAME variable, as a prefix assignment ahead of
@@ -218,6 +218,10 @@ if [ -n "$KEY_VAR" ]; then
         devkey) continue ;;
         %s)
           if grep -qE "\"\\\$\\{?${KEY_VAR}\\}?\"" <<<"$text"; then continue; fi ;;
+        # The key read from its 0600 file (invariant 26): the summary's curl hint
+        # passes $(cat FILE), and not-printed.sh holds FILE to be written from the key.
+        "\$(cat")
+          if grep -qE "\"[$][{]?${KEY_VAR}_FILE[}]?\"" <<<"$text"; then continue; fi ;;
       esac
       printf 'up.sh:%s: a use of the cloud'"'"'s credential presents %s, not this run'"'"'s key ($%s).\n' "$ln" "$tok" "$KEY_VAR" >&2
       problems=$(( problems + 1 ))

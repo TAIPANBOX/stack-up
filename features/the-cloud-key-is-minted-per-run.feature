@@ -38,7 +38,7 @@ Feature: the tokenfuse cloud gets one random key per run, and nothing uses devke
     When any of them presents devkey or another key
     Then cloud-key-is-per-run.sh fails
     # -> gates-have-teeth.sh "cloud-key-is-per-run: the demo seed posts with the old literal"
-    # -> gates-have-teeth.sh "cloud-key-is-per-run: the dashboard link carries another key"
+    # -> gates-have-teeth.sh "cloud-key-is-not-printed: the dashboard link carries another key"
     # -> gates-have-teeth.sh "cloud-key-is-per-run: the summary names bearer devkey again"
 
   Scenario: wardryx's own dev key is out of scope

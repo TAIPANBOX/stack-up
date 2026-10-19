@@ -33,6 +33,7 @@ bash -n up.sh && bash -n down.sh && bash -n routines.sh
 ./scripts/gateway-cache-is-off.sh
 ./scripts/declassify-is-keyed.sh
 ./scripts/cloud-key-is-per-run.sh
+./scripts/cloud-key-is-not-printed.sh
 ./scripts/admin-keys-are-per-run.sh
 ./scripts/postures-are-held.sh
 ./scripts/keyryx-is-per-run.sh
@@ -49,6 +50,7 @@ bash -n up.sh && bash -n down.sh && bash -n routines.sh
 ./scripts/die-keeps-its-exit-status.sh
 ./scripts/demo-issuer-is-unbound.sh
 ./scripts/bus-is-operator-owned.sh
+./scripts/demo-runs-after-its-planes.sh
 ./scripts/gates-have-teeth.sh   # invariant 6; needs a clean tree
 ```
 
@@ -425,13 +427,14 @@ building here and the thing that most often gets skipped.
     set logs an ERROR and exits 2, and an empty `TOKENFUSE_CLOUD_KEYS`
     authenticates nobody, so this launcher, which ran the cloud exactly that way,
     would stop at "cloud did not come up". `up.sh` now mints `CLOUD_KEY` with
-    `rand_hex 16` above the first gateway start (the gateway starts first and is
-    handed the key at its start), refuses to continue on an empty result, and
+    `rand_hex 16` above the first gateway start (the gateway is handed the key at
+    its start; the cloud now starts before it, invariant 27), refuses to continue on an empty result, and
     starts the cloud with `TOKENFUSE_CLOUD_KEYS="$CLOUD_KEY:default:admin"` (the
     org, role and no-site the old fallback had). The gateway gets it as
     `TOKENFUSE_CLOUD_KEY`, a prefix assignment ahead of `env` like the declassify
     key; the demo seed, the dashboard link and the closing summary carry the same
-    key, and the summary prints it once. `STACK_UP_CLOUD_KEY` replaces the minted
+    key, and the summary names the file that holds it instead of printing it
+    (invariant 26). `STACK_UP_CLOUD_KEY` replaces the minted
     key with the operator's own, refused at argument parsing (exit 2) unless it
     is 16 to 128 characters from `A-Z a-z 0-9 . _ ~ -`, because it is written into
     a `key:org:role` spec and a URL query. Nothing sets
@@ -452,7 +455,7 @@ building here and the thing that most often gets skipped.
     `gates-have-teeth.sh`, `features/the-cloud-key-is-minted-per-run.feature`.
     Not covered: a running cloud accepting the key and refusing `devkey`, which
     needs a built cloud; and that the key is private: it is printed in the
-    summary and the dashboard link on purpose, and the seed's `curl` carries it
+    file and the dashboard link's fragment on purpose (invariant 26), and the seed's `curl` carries it
     on its command line for the moment it runs.)*
 
 18. **Every gateway start runs tokenfuse's agent firewall from one switch, and the
@@ -623,6 +626,52 @@ building here and the thing that most often gets skipped.
     itself, a writer asked to create a stream in a directory another uid owns, which needs a second user;
     and the 0640 mode of the other Go writers (wardryx, scopyx, costcrew, typryx, keyryx, agent-conform),
     which were not run here.)*
+
+26. **The Cloud key stays out of URLs and out of the terminal.** `@decided 2026-10-17`
+    (paraphrased, from the 2026-10-17 security review, finding F-028): a credential in a
+    query string reaches the server's log, the browser history and the Referer, and a
+    credential printed to a terminal reaches whatever captured it, so the cloud key is
+    held in files and printed nowhere. `@claude 2026-10-19`: the mechanism is my
+    reading of that decision. The dashboard link carries the key after `#key=`, a
+    fragment a browser never sends to a server; the dashboard reads it first and removes
+    it from the address bar on arrival (tokenfuse#469). The key and the key-bearing link
+    are written to 0600 files under `$STACK_UP_HOME` (`cloud-key`, `dashboard-link`),
+    each made under `umask 077`. The summary prints the link without the key, the path of
+    the file that holds the key-bearing link with the one line that opens it, and the
+    path of the key file.
+    *(gate: `scripts/cloud-key-is-not-printed.sh`: no URL up.sh builds carries `key=` in a
+    query string; no command that prints names the Cloud key or a variable derived from
+    it; a link carries the key after `#key=`; every write of the key or its link to a
+    file is made `umask 077` and `chmod 600` in the same statement. 8 fault cases, one
+    "measured nothing" case and 2 pass cases in `gates-have-teeth.sh`; `features/the-cloud-key-stays-out-of-sight.feature`,
+    7 scenarios. Not covered: that a running dashboard reads the fragment and clears the
+    address bar, which is tokenfuse's own test and a browser run, not done here; that the
+    loopback origin is answered by the cloud, which tokenfuse-cloud v1.19.0 does by default
+    (read in its `crates/cloud/src/cors.rs`, not run here); and that the key is private
+    inside a process: `/proc/<pid>/environ`, `ps eww`, and the launcher's own curl calls,
+    which carry it on their command line while they run.)*
+
+27. **The demo's calls through the gateway are made after every plane that answers them.**
+    `@claude 2026-10-19`: two ordering faults made the demo's six calls answer nothing, and
+    neither was loud: the stand came up, the summary said "the gateway answered nothing" and
+    the dashboard showed only the seed. A gateway configured with a control plane refuses
+    every call that carries a run id with `503 seed_pending` until it has read the Cloud's
+    money state (tokenfuse invariant 103, `seedgate.rs`), and the Cloud was started after
+    the gateway; and the gateway fails closed on wardryx (invariant 20) while the demo ran
+    before wardryx started. So the Cloud starts, and is waited for, before the first gateway
+    start, and `demo_traffic` runs once, after the wardryx health wait and before idryx and
+    the notifier start, since they read the bus the demo fills. `@measured` `./up.sh` on a Linux
+    sandbox at `dc4a137`, then with these two moves applied, reading its `governed traffic`
+    line and `grep -c 'wardryx decide call failed' logs/gateway.log`, 2026-10-19: before,
+    all six calls refused (503 `seed_pending` in the seed gap, then wardryx unreachable);
+    after, "2 call(s) allowed, then the Breaker refused 4 with HTTP 402", and 0 wardryx
+    failures in the gateway log.
+    *(gate: `scripts/demo-runs-after-its-planes.sh`: the first Cloud start and its
+    `wait_health cloud` come before the first gateway start; `demo_traffic` is called once,
+    after `wait_health wardryx` and before `register idryx` and `register heraldyx`. 5 fault
+    cases, one "measured nothing" case and 1 pass case in `gates-have-teeth.sh`. Not covered:
+    the two 200s and four 402s themselves, which need built binaries and are the bring-up
+    above, not a script here.)*
 
 An approved architecture decision is **not finished** until it is two things: a
 numbered invariant in this file, and a gate in a script if it can be checked

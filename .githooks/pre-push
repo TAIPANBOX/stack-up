@@ -38,6 +38,7 @@ step "gateway decides its upstream" "./scripts/gateway-decides-its-upstream.sh"
 step "gateway semantic cache off" "./scripts/gateway-cache-is-off.sh"
 step "gateway declassify key per run" "./scripts/declassify-is-keyed.sh"
 step "cloud key per run" "./scripts/cloud-key-is-per-run.sh"
+step "cloud key is not printed" "./scripts/cloud-key-is-not-printed.sh"
 step "gateway admin key per run" "./scripts/admin-keys-are-per-run.sh"
 step "gateway and broker postures held" "./scripts/postures-are-held.sh"
 step "keyryx per run, wardryx signs through custody" "./scripts/keyryx-is-per-run.sh"
@@ -54,6 +55,7 @@ step "features are bound" "./scripts/features-are-bound.sh"
 step "refusals keep their exit status" "./scripts/die-keeps-its-exit-status.sh"
 step "demo issuer's trusted line is unbound" "./scripts/demo-issuer-is-unbound.sh"
 step "bus directory stays this user's" "./scripts/bus-is-operator-owned.sh"
+step "demo runs after the planes that answer it" "./scripts/demo-runs-after-its-planes.sh"
 
 echo
 if [ "$fail" -ne 0 ]; then

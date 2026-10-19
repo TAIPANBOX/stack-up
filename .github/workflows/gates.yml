@@ -42,6 +42,9 @@ jobs:
       - name: the cloud holds one per-run key, every caller uses it, and nothing sets the removed devkey switch
         run: ./scripts/cloud-key-is-per-run.sh
 
+      - name: the Cloud key is in no query string and on no printed line, and the files that hold it are 0600
+        run: ./scripts/cloud-key-is-not-printed.sh
+
       - name: the gateway's admin routes take a key minted for the run, written to a 0600 file, never printed
         run: ./scripts/admin-keys-are-per-run.sh
 
@@ -89,6 +92,9 @@ jobs:
 
       - name: the bus directory stays this user's
         run: ./scripts/bus-is-operator-owned.sh
+
+      - name: the demo runs after the planes that answer it
+        run: ./scripts/demo-runs-after-its-planes.sh
 
       # Last, because it mutates tracked files and restores them. It needs a
       # clean tree and says so plainly, so it also reports any earlier step

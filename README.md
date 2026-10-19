@@ -571,8 +571,7 @@ refused unless its commit is the one the table names. Clones go into
 `~/.stack-up/repos/`. A sibling checkout next to `stack-up` is not used by
 default, because a branch there can hold anything. `--from-main` builds sibling or
 main checkouts instead, as this launcher used to, and the run says at the top that
-its build is not a release. verdryx publishes no release tag, so it is installed only
-with `--from-main`.
+its build is not a release.
 
 ## What you are looking at
 

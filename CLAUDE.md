@@ -37,6 +37,7 @@ bash -n up.sh && bash -n down.sh && bash -n routines.sh
 ./scripts/admin-keys-are-per-run.sh
 ./scripts/postures-are-held.sh
 ./scripts/keyryx-is-per-run.sh
+./scripts/record-is-signed-by-default.sh
 ./scripts/wardryx-fails-closed.sh
 ./scripts/firewall-is-enforce.sh
 ./scripts/pii-is-shadow.sh
@@ -575,18 +576,21 @@ building here and the thing that most often gets skipped.
     a viewer, and the broker's DLP and scan refusing a secret or a poisoned tool; these need built
     binaries. The broker's block settings were not run against typryx's own tool descriptions.)*
 
-23. **keyryx runs per run: custody holds wardryx's approval key, the witness reads the record from its own process, and no key value leaves the launcher.**
+23. **keyryx's custody holds wardryx's approval key, the witness reads the record from its own process, and no key value leaves the launcher.**
     `@decided 2026-10-18` (paraphrased, from the agent-security review's wave 2 design): key custody
     and an independent witness of the record, both off every request path, with wardryx's approvals
     signed by custody and not by a shared secret. `@claude 2026-10-18`: the shape here is my reading of
     that decision for a launcher, not a stated decision. `up.sh` builds keyryx from the commit that
     tag and commit in the pin table names, refused unless the clone is that commit (invariant 29), because keyryx v0.1.1 publishes a
-    container image and no binary and this launcher runs no containers. It mints three values per run
-    above the first custody start, each refused when empty: the custody root key and the witness root
-    key (`rand_hex 32`, each in its own 0600 file under `$STACK_UP_HOME/keyryx`) and the bearer key
-    wardryx presents to custody (`rand_hex 24`, written with no trailing newline). The policy names one
-    consumer, wardryx, by the SHA-256 of that bearer key, and one held key, `wardryx-approval`. Custody
-    and the witness each get a fresh data directory, and the two directories differ. wardryx starts with
+    container image and no binary and this launcher runs no containers. It mints the bearer key wardryx
+    presents to custody per run (`rand_hex 24`, written with no trailing newline, refused when empty),
+    and the custody and witness root keys (`rand_hex 32`, each in its own 0600 file under
+    `$STACK_UP_HOME/keyryx`) once, when their file is absent. `@decided 2026-10-19` (paraphrased): the
+    root keys are kept across runs, not wiped each run, because a root signed in one run must verify in
+    the next (invariant 30). `@claude 2026-10-19`: this amends the per-run wording this invariant carried
+    on 2026-10-18. The policy names two consumers, wardryx and record-seal, each by the SHA-256 of its
+    bearer key, and two held keys, `wardryx-approval` and `trailryx-root` (invariant 30). Custody and the
+    witness each keep their own data directory, and the two directories differ. wardryx starts with
     `WARDRYX_APPROVAL_SIGNER=keyryx`, its custody URL and its key file, and without
     `WARDRYX_APPROVAL_SECRET`; the launcher refuses to start a wardryx binary that does not name the
     signer. The witness writes its alerts to its own data directory, not to the shared bus, because
@@ -713,6 +717,34 @@ building here and the thing that most often gets skipped.
     cloned all 14 pinned tags and each HEAD equalled its table commit; verdryx was refused; a forced
     commit mismatch was refused. Not covered: a live bring-up at the new pins (not run here), and the
     cross-version fit of wardryx v2.4.0 with keyryx v0.1.1, which only the wardryx compatibility note reads.)*
+
+30. **The sealed record is signed through keyryx by default, and `--without-keyryx` is the one switch that turns it off, and says the record pack is then unsigned.**
+    `@decided 2026-10-19` (paraphrased): keyryx is part of every install, and the record is signed through it
+    by default. `@claude 2026-10-19`: the mechanism is my reading of trailryx v1.4.0's signer and keyryx
+    v0.1.1's README, not a stated decision. keyryx starts when a signature has work (the policy plane or the
+    record plane) and never under the flag, so `--only money` starts none. Custody holds `trailryx-root`, an
+    ES384 key, and only the record-seal consumer may sign with it. trailryx v1.4.0 reads one ES384 key from
+    the key set and signs with `TRAILRYX_SIGNER=keyryx`, `TRAILRYX_KEYRYX_URL` and
+    `TRAILRYX_KEYRYX_CREDENTIAL_FILE`, and reads attestations from `TRAILRYX_WITNESS_ATTESTATIONS`. The
+    record-seal credential is minted once and kept. Every call to the record plane goes through one function,
+    `seal_node` in up.sh and `trailryx_node` in routines.sh: signed when keyryx is up, and with the signer
+    variables removed when it is not, so an exported variable cannot sign a root by accident. The witness
+    reads the records directory under the tenant the seal writes (`RECORDS_TENANT`, `acme`, trailryx's
+    default). The scheduled seal reads `$STACK_UP_HOME/keyryx/record-signing`, which each run writes, because
+    a timer inherits no environment. The opt-out, and a custody that does not come up on a run without the
+    policy plane, both say the record pack is unsigned. A custody that does not come up on a run with the
+    policy plane still stops the run, as before. Named, not done: `TRAILRYX_KEYRYX_KID` (trailryx#112, not
+    released) is a TODO line in up.sh; and a rotation of `trailryx-root` is not supported, since trailryx
+    v1.4.0 refuses a key set that holds two keys.
+    *(gate: `scripts/record-is-signed-by-default.sh`: the flag and the on-by-default switch; the custody start
+    inside the keyryx block; every trailryx-node call in up.sh and routines.sh through the one function, which
+    sets the signer when signing and removes it when not; the witness's records directory and the seal's
+    tenant equal; the policy names trailryx-root as ES384 and grants record-seal sign on it alone; the root
+    keys and the credential are kept, not wiped; the closing output and the launch plan name the opt-out; the
+    scheduled seal reads the state up.sh writes. 21 cases in `gates-have-teeth.sh`, 20 fault and 1 pass;
+    `features/the-record-is-signed-by-default.feature`, 7 scenarios. Not covered: a live custody signing a root
+    and the witness attesting one, which need built binaries; that the pinned trailryx reads
+    TRAILRYX_KEYRYX_KID; and the rotation of trailryx-root.)*
 
 An approved architecture decision is **not finished** until it is two things: a
 numbered invariant in this file, and a gate in a script if it can be checked

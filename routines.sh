@@ -121,6 +121,7 @@ EVENTS_DIR="$STACK_UP_HOME/events"
 # keep in sync with up.sh
 EVENTS_FILE="$EVENTS_DIR/tokenfuse.ndjson"
 RECORDS_DIR="$STACK_UP_HOME/records"     # keep in sync with up.sh
+RECORDS_TENANT="acme"                    # keep in sync with up.sh (invariant 30)
 # The trust domain the record plane is told to accept. `up.sh` writes the one
 # it actually minted identities under into $STACK_UP_HOME/trust-domain, so a
 # scheduled run seals under the same name the launcher used rather than under a
@@ -645,6 +646,27 @@ routine_chain_verify() {
 # nothing new: the importer remembers its position per file and a file it has
 # already read in full costs one read and reports "nothing new", not a
 # duplicate.
+#
+# trailryx_node <trailryx-node arguments>: every call this routine makes to the record plane
+# goes through here, signed the way up.sh signs its seal (invariant 30). A timer inherits no
+# environment, so up.sh writes $STACK_UP_HOME/keyryx/record-signing, "on" only when keyryx
+# custody came up in its last run, and this reads that file. Anything else, or a missing
+# credential, runs with the signer variables removed. A root that cannot reach custody is
+# queued by the node and signed when custody answers; the records are sealed either way.
+trailryx_node() {
+  local keyryx_dir="$STACK_UP_HOME/keyryx"
+  if [ "$(cat "$keyryx_dir/record-signing" 2>/dev/null)" = "on" ] && [ -s "$keyryx_dir/trailryx.key" ]; then
+    TRAILRYX_SIGNER=keyryx \
+    TRAILRYX_KEYRYX_URL="http://127.0.0.1:4340" \
+    TRAILRYX_KEYRYX_CREDENTIAL_FILE="$keyryx_dir/trailryx.key" \
+    TRAILRYX_WITNESS_ATTESTATIONS="$keyryx_dir/witness/attestations" \
+      "$BIN_DIR/trailryx-node" "$@"
+  else
+    env -u TRAILRYX_SIGNER -u TRAILRYX_KEYRYX_URL -u TRAILRYX_KEYRYX_CREDENTIAL_FILE -u TRAILRYX_WITNESS_ATTESTATIONS \
+      "$BIN_DIR/trailryx-node" "$@"
+  fi
+}
+
 routine_trailryx_seal() {
   local node="$BIN_DIR/trailryx-node" verify="$BIN_DIR/trailryx-verify"
   if [ ! -x "$node" ] || [ ! -x "$verify" ]; then
@@ -719,7 +741,7 @@ print(seen, matched)
   local written=0 lost=0 sealed=0 failed=0 foreign=0
   local f out rc w l n fd
   for f in "${files[@]}"; do
-    out="$("$node" events --file "$f" --data "$RECORDS_DIR" --trust-domain "$DEMO_TRUST_DOMAIN" --seal-records 500 2>&1)"
+    out="$(trailryx_node events --file "$f" --data "$RECORDS_DIR" --tenant "$RECORDS_TENANT" --trust-domain "$DEMO_TRUST_DOMAIN" --seal-records 500 2>&1)"
     rc=$?
     { printf -- '--- %s ---\n' "$f"; printf '%s\n' "$out"; } >> "$log"
     if [ "$rc" -ne 0 ]; then
@@ -788,7 +810,7 @@ print(seen, matched)
   local pack
   pack="$OUT_DIR/trailryx-$(date -u +%Y%m%dT%H%M%SZ).pack"
   local pack_out pack_rc
-  pack_out="$("$node" read --data "$RECORDS_DIR" --all --pack "$pack" 2>&1)"
+  pack_out="$(trailryx_node read --data "$RECORDS_DIR" --tenant "$RECORDS_TENANT" --all --pack "$pack" 2>&1)"
   pack_rc=$?
   printf '%s\n' "$pack_out" >> "$log"
   if [ "$pack_rc" -ne 0 ] || [ ! -f "$pack" ]; then

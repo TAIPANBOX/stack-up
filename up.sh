@@ -149,6 +149,11 @@
 #                       clamped. A positive decimal, at most six decimals;
 #                       anything else exits 2 before anything is built. Needs a
 #                       gateway built from tokenfuse v1.5.0 or newer.
+#   --without-keyryx    turns keyryx off. keyryx is part of every install: custody
+#                       signs each sealed record's root under trailryx-root and the
+#                       witness reads the record (invariant 30). With this flag the
+#                       record pack is UNSIGNED, which is the weaker setting, and
+#                       the closing output says so.
 #   --firewall <mode>   the agent firewall in every gateway start (tokenfuse's
 #                       TOKENFUSE_FIREWALL): enforce (the default), shadow (writes
 #                       what it would refuse and refuses nothing) or off. Any other
@@ -234,10 +239,12 @@ REPOS_DIR="$STACK_UP_HOME/repos"
 # builds with the SAME `.marker-<name>` filenames in that same directory, so
 # sharing it would have each installer silently validating the other's build.
 MARKERS_DIR="$STACK_UP_HOME/markers"
-# keyryx's state, rebuilt every run (invariant 23): custody and the witness each
-# get their own data directory and their own root key, and the wardryx key file
-# is the bearer key wardryx presents to custody. Nothing here survives a run, so
-# a root key can never orphan the keys a previous run wrapped under another.
+# keyryx's state (invariants 23 and 30): custody and the witness each get their own data
+# directory and their own root key, the wardryx key file is the bearer key wardryx
+# presents to custody, and the record-seal credential is the bearer the record plane
+# presents to custody when it asks for a root's signature. The root keys and the
+# record-seal credential are minted once and kept, so a root signed in one run still
+# verifies in the next. The wardryx bearer is minted for each run.
 KEYRYX_DIR="$STACK_UP_HOME/keyryx"
 KEYRYX_CUSTODY_DIR="$KEYRYX_DIR/custody"
 KEYRYX_WITNESS_DIR="$KEYRYX_DIR/witness"
@@ -245,6 +252,7 @@ KEYRYX_CUSTODY_ROOT_KEY_PATH="$KEYRYX_DIR/custody-root.key"
 KEYRYX_WITNESS_ROOT_KEY_PATH="$KEYRYX_DIR/witness-root.key"
 KEYRYX_POLICY_PATH="$KEYRYX_DIR/policy.json"
 KEYRYX_WARDRYX_KEY_PATH="$KEYRYX_DIR/wardryx.key"
+KEYRYX_TRAILRYX_KEY_PATH="$KEYRYX_DIR/trailryx.key"
 # ---- THE PIN TABLE (invariant 29) -----------------------------------------
 #
 # The one place a component's release is written down. Every component this
@@ -291,6 +299,10 @@ EVENTS_FILE="$EVENTS_DIR/tokenfuse.ndjson"
 # looks this path up by convention, so it belongs beside events/ and logs/ as
 # this launcher's own state rather than beside the installed binaries.
 RECORDS_DIR="$STACK_UP_HOME/records"
+# The tenant the record plane seals under. trailryx-node's own default, named here so
+# that the seal and the keyryx witness, which reads this tenant's directory, cannot
+# disagree (invariant 30).
+RECORDS_TENANT="acme"
 # The trust domain every demo agent identity in this launcher is minted under
 # (see seed_demo and seed_demo_fleet below). Named once here rather than left
 # as a literal repeated at each call site: the record plane refuses every
@@ -400,6 +412,10 @@ FIREWALL_MODE="enforce"
 # scanner off silently.
 PII_MODE="shadow"
 FORCE_INSTALL=0
+# keyryx is part of every install (invariant 30): custody signs the sealed record's
+# root and the witness reads it. --without-keyryx turns it off, from the flag only,
+# never from the caller's environment. The record pack is then unsigned.
+WITHOUT_KEYRYX=0
 # --from-main builds sibling or main checkouts instead of the pinned releases (the
 # pin table above). A developer switch: it is never the default, and it says so.
 FROM_MAIN=0
@@ -449,6 +465,7 @@ while [ $# -gt 0 ]; do
     --typed-plan|--plan) TYPED_PLAN=1 ;;
     --force-install) FORCE_INSTALL=1 ;;
     --from-main) FROM_MAIN=1 ;;
+    --without-keyryx) WITHOUT_KEYRYX=1 ;;
     --workspace) shift; WORKSPACE="${1:-}"; [ -n "$WORKSPACE" ] || { echo "stack-up: --workspace needs a directory" >&2; exit 2; } ;;
     -h|--help) usage; exit 0 ;;
     *) echo "stack-up: unknown option '$1' (try --help)" >&2; exit 2 ;;
@@ -748,6 +765,11 @@ resolve_pii_mode() {
 }
 
 print_launch_plan() {
+  if [ "$WITHOUT_KEYRYX" -eq 1 ]; then
+    printf 'launch: record signing: off (--without-keyryx): the record pack is UNSIGNED and nothing witnesses it; this is the weaker setting\n'
+  else
+    printf 'launch: record signing: keyryx (on by default: custody signs each sealed root under trailryx-root, and the witness reads the record; --without-keyryx turns it off)\n'
+  fi
   if [ "$FROM_MAIN" -eq 1 ]; then
     printf 'launch: components: built from SIBLING OR MAIN CHECKOUTS (--from-main), NOT the pinned release tags (invariant 29)\n'
   else
@@ -1470,6 +1492,54 @@ if [ "$WANT_POLICY" -eq 1 ] && { port_busy "$KEYRYX_PORT" || port_busy "$KEYRYX_
   warn "port $KEYRYX_PORT or $KEYRYX_WITNESS_PORT is busy: skipping wardryx, which signs its approvals through keyryx."
   WANT_POLICY=0
 fi
+# keyryx is part of every install (invariant 30). It has work only where something is
+# signed: an approval (the policy plane) or a sealed record (the record plane). --only
+# money has neither, so it starts none. --without-keyryx turns it off by the flag.
+WANT_KEYRYX=1
+[ "$WITHOUT_KEYRYX" -eq 1 ] && WANT_KEYRYX=0
+if [ "$WANT_POLICY" -eq 0 ] && [ "$WANT_RECORDS" -eq 0 ]; then
+  WANT_KEYRYX=0
+fi
+if [ "$WANT_KEYRYX" -eq 1 ] && { port_busy "$KEYRYX_PORT" || port_busy "$KEYRYX_WITNESS_PORT"; }; then
+  warn "port $KEYRYX_PORT or $KEYRYX_WITNESS_PORT is busy: skipping keyryx, so this run's record is not signed."
+  WANT_KEYRYX=0
+fi
+if [ "$WANT_KEYRYX" -eq 1 ] && ! have go; then
+  warn "go not found: keyryx is not built, so this run's record is not signed."
+  WANT_KEYRYX=0
+fi
+# keyryx_unavailable <why>: with the policy plane, keyryx is what wardryx signs through, so
+# a keyryx that cannot be fetched or built stops the run. Without it, the record plane
+# goes on and its record is not signed this run, which the closing output says (invariant 30).
+keyryx_unavailable() {
+  if [ "$WANT_POLICY" -eq 1 ]; then
+    die "$1. wardryx signs its approvals through keyryx, and the stand will not run without it."
+  fi
+  warn "$1; this run's record is not signed."
+  WANT_KEYRYX=0
+}
+# keyryx is built from the pin table (invariant 29): pinned_repo clones the release tag and
+# refuses any checkout that is not the pinned commit. Built here, before the block that
+# starts it, so a build that cannot happen is one decision and not a stop in the middle.
+KEYRYX_BIN="$BIN_DIR/keyryx"
+if [ "$WANT_KEYRYX" -eq 1 ]; then
+  read -r KEYRYX_TAG KEYRYX_COMMIT <<<"$(pin_of keyryx)"
+  if ! KEYRYX_REPO="$(pinned_repo keyryx)"; then
+    keyryx_unavailable "could not fetch keyryx $KEYRYX_TAG"
+  elif foreign_binary keyryx; then
+    die "$KEYRYX_BIN was installed by another tool, and this launcher builds keyryx $KEYRYX_TAG; remove it or run again with --force-install."
+  elif installed_by_us keyryx && [ "$(cat "$MARKERS_DIR/.keyryx-commit" 2>/dev/null)" = "$KEYRYX_COMMIT" ]; then
+    log "keyryx: $KEYRYX_TAG already built, skipping build"
+  else
+    log "keyryx: building $KEYRYX_TAG (Go)"
+    if ! ( cd "$KEYRYX_REPO" && go build -o "$BUILD_DIR/keyryx" ./cmd/keyryx ) \
+       || ! install_binary keyryx "$BUILD_DIR/keyryx"; then
+      keyryx_unavailable "keyryx build failed. See the build output above"
+    else
+      printf '%s\n' "$KEYRYX_COMMIT" > "$MARKERS_DIR/.keyryx-commit"
+    fi
+  fi
+fi
 if [ "$WANT_IDENTITY" -eq 1 ] && port_busy "$IDRYX_PORT"; then
   warn "port $IDRYX_PORT is busy: skipping idryx."
   WANT_IDENTITY=0
@@ -2037,83 +2107,101 @@ if [ "$WANT_DASHBOARD" -eq 1 ] && [ -f "$DASH_OUT/index.html" ]; then
 fi
 
 # --------------------------------------------------------------------------
-# Keyryx (with wardryx): key custody, and the witness of the record.
+# Keyryx: key custody, and the witness of the record (invariant 30, and invariant 23
+# for the keys' custody and their separation).
 # --------------------------------------------------------------------------
-# Custody holds the key wardryx signs approvals with (wardryx v2.2.0 with
-# WARDRYX_APPROVAL_SIGNER=keyryx, keyryx's wardryx-approval key). The witness
-# reads the same event streams from a process of its own and holds nothing that
-# custody signs with. Both are per run (invariant 23): fresh data directories,
-# fresh root keys, and no key value in the terminal, a log or an argv.
+# Custody holds the keys: wardryx's approval key (wardryx v2.2.0 with
+# WARDRYX_APPROVAL_SIGNER=keyryx, keyryx's wardryx-approval key) and trailryx-root,
+# the ES384 key each sealed record's root is signed under. The witness reads the
+# record and the event streams from a process of its own and holds nothing that
+# custody signs with. Custody and the witness keep separate data directories and
+# separate root keys. The root keys and the record-seal credential are minted once
+# and kept, so a root signed in one run still verifies in the next. No key value
+# goes to the terminal, a log or an argv.
 #
-# Only with the policy plane. keyryx has no other consumer in this launcher, and
-# a stand without wardryx has no approval to sign.
-if [ "$WANT_POLICY" -eq 1 ]; then
-  # The pin is read from the table above and the clone is made and checked by
-  # pinned_repo, which refuses a checkout that is not that commit (invariant 29).
-  read -r KEYRYX_TAG KEYRYX_COMMIT <<<"$(pin_of keyryx)"
-  KEYRYX_REPO="$(pinned_repo keyryx)" \
-    || die "could not fetch keyryx $KEYRYX_TAG. wardryx signs its approvals through keyryx, and the stand will not run without it."
-
-  KEYRYX_BIN="$BIN_DIR/keyryx"
-  if foreign_binary keyryx; then
-    die "$KEYRYX_BIN was installed by another tool, and this launcher builds keyryx $KEYRYX_TAG; remove it or run again with --force-install."
-  elif installed_by_us keyryx && [ "$(cat "$MARKERS_DIR/.keyryx-commit" 2>/dev/null)" = "$KEYRYX_COMMIT" ]; then
-    log "keyryx: $KEYRYX_TAG already built, skipping build"
-  else
-    log "keyryx: building $KEYRYX_TAG (Go)"
-    if ! ( cd "$KEYRYX_REPO" && go build -o "$BUILD_DIR/keyryx" ./cmd/keyryx ) \
-       || ! install_binary keyryx "$BUILD_DIR/keyryx"; then
-      die "keyryx build failed, and wardryx cannot sign approvals without it. See the build output above."
-    fi
-    printf '%s\n' "$KEYRYX_COMMIT" > "$MARKERS_DIR/.keyryx-commit"
-  fi
-
-  # Per-run state: nothing from an earlier run is reused, so a root key cannot be
-  # left unable to open the keys a previous run wrapped under another.
+# It starts when WANT_KEYRYX says so: by default, with the policy plane or the record
+# plane, and never under --without-keyryx. wardryx cannot sign without custody, so a
+# custody that does not come up stops a run with the policy plane. Without it, the
+# run goes on and says the record is not signed this run.
+KEYRYX_SIGNING=0
+if [ "$WANT_KEYRYX" -eq 1 ]; then
   port_busy "$KEYRYX_PORT" && die "port $KEYRYX_PORT is busy; keyryx custody cannot listen there."
   port_busy "$KEYRYX_WITNESS_PORT" && die "port $KEYRYX_WITNESS_PORT is busy; the keyryx witness cannot listen there."
-  rm -rf "$KEYRYX_DIR"
+  # Kept across runs (invariant 30): the custody and witness directories are not wiped,
+  # because the keys in them, and the root keys that wrap them, must outlive this run for
+  # a sealed root to verify in the next one. A directory an earlier run made is reused.
   mkdir -p "$KEYRYX_CUSTODY_DIR" "$KEYRYX_WITNESS_DIR" \
     || die "could not create the keyryx state under $KEYRYX_DIR."
   chmod 700 "$KEYRYX_CUSTODY_DIR" "$KEYRYX_WITNESS_DIR" \
     || die "could not make the keyryx data directories 0700."
 
-  # The three values, minted above the first keyryx start. Each refusal follows its
-  # mint: the root key file is read at start, and an empty value would start a
-  # custody that wraps its keys under nothing.
-  KEYRYX_CUSTODY_ROOT_KEY="$(rand_hex 32)"
-  [ -n "$KEYRYX_CUSTODY_ROOT_KEY" ] \
-    || die "could not mint keyryx's custody root key (no openssl, and /dev/urandom gave nothing); refusing to start custody without one."
-  KEYRYX_WITNESS_ROOT_KEY="$(rand_hex 32)"
-  [ -n "$KEYRYX_WITNESS_ROOT_KEY" ] \
-    || die "could not mint keyryx's witness root key (no openssl, and /dev/urandom gave nothing); refusing to start the witness without one."
+  # The two root keys and the record-seal credential are minted ONCE: an existing
+  # non-empty file is read and kept, and only a missing one is minted (invariant 30).
+  # Each mint is refused when empty, above the first custody start: the root key file
+  # is read at start, and an empty value would start a custody that wraps its keys
+  # under nothing.
+  if [ -s "$KEYRYX_CUSTODY_ROOT_KEY_PATH" ]; then
+    KEYRYX_CUSTODY_ROOT_KEY="$(cat "$KEYRYX_CUSTODY_ROOT_KEY_PATH")"
+  else
+    KEYRYX_CUSTODY_ROOT_KEY="$(rand_hex 32)"
+    [ -n "$KEYRYX_CUSTODY_ROOT_KEY" ] \
+      || die "could not mint keyryx's custody root key (no openssl, and /dev/urandom gave nothing); refusing to start custody without one."
+  fi
+  if [ -s "$KEYRYX_WITNESS_ROOT_KEY_PATH" ]; then
+    KEYRYX_WITNESS_ROOT_KEY="$(cat "$KEYRYX_WITNESS_ROOT_KEY_PATH")"
+  else
+    KEYRYX_WITNESS_ROOT_KEY="$(rand_hex 32)"
+    [ -n "$KEYRYX_WITNESS_ROOT_KEY" ] \
+      || die "could not mint keyryx's witness root key (no openssl, and /dev/urandom gave nothing); refusing to start the witness without one."
+  fi
+  if [ -s "$KEYRYX_TRAILRYX_KEY_PATH" ]; then
+    KEYRYX_TRAILRYX_KEY="$(cat "$KEYRYX_TRAILRYX_KEY_PATH")"
+  else
+    KEYRYX_TRAILRYX_KEY="$(rand_hex 24)"
+    [ -n "$KEYRYX_TRAILRYX_KEY" ] \
+      || die "could not mint the credential the record seal presents to keyryx (no openssl, and /dev/urandom gave nothing); refusing to start custody that would admit nobody to sign a root."
+  fi
+  # The wardryx key is minted for this run, as before: it is a bearer that wardryx is
+  # handed at its own start, and the policy below names its digest.
   KEYRYX_WARDRYX_KEY="$(rand_hex 24)"
   [ -n "$KEYRYX_WARDRYX_KEY" ] \
     || die "could not mint the key wardryx presents to keyryx (no openssl, and /dev/urandom gave nothing); refusing to start custody that would admit nobody."
 
-  # The key files are written under umask 077 and made 0600. The wardryx key is
-  # written with no trailing newline, so the bytes wardryx presents are exactly the
-  # bytes the policy's digest was taken from.
+  # The key files are written under umask 077 and made 0600. A key that is already on
+  # disk is not rewritten. The bearer keys are written with no trailing newline, so the
+  # bytes presented are exactly the bytes the policy's digest was taken from.
   if ! ( umask 077
-         printf '%s\n' "$KEYRYX_CUSTODY_ROOT_KEY" > "$KEYRYX_CUSTODY_ROOT_KEY_PATH"
-         printf '%s\n' "$KEYRYX_WITNESS_ROOT_KEY" > "$KEYRYX_WITNESS_ROOT_KEY_PATH"
+         [ -s "$KEYRYX_CUSTODY_ROOT_KEY_PATH" ] || printf '%s\n' "$KEYRYX_CUSTODY_ROOT_KEY" > "$KEYRYX_CUSTODY_ROOT_KEY_PATH" || exit 1
+         [ -s "$KEYRYX_WITNESS_ROOT_KEY_PATH" ] || printf '%s\n' "$KEYRYX_WITNESS_ROOT_KEY" > "$KEYRYX_WITNESS_ROOT_KEY_PATH" || exit 1
+         [ -s "$KEYRYX_TRAILRYX_KEY_PATH" ] || printf '%s' "$KEYRYX_TRAILRYX_KEY" > "$KEYRYX_TRAILRYX_KEY_PATH" || exit 1
          printf '%s' "$KEYRYX_WARDRYX_KEY" > "$KEYRYX_WARDRYX_KEY_PATH" ); then
     die "could not write keyryx's key files under $KEYRYX_DIR; refusing to start custody whose keys nobody could read."
   fi
   chmod 600 "$KEYRYX_CUSTODY_ROOT_KEY_PATH" || die "could not make $KEYRYX_CUSTODY_ROOT_KEY_PATH 0600."
   chmod 600 "$KEYRYX_WITNESS_ROOT_KEY_PATH" || die "could not make $KEYRYX_WITNESS_ROOT_KEY_PATH 0600."
+  chmod 600 "$KEYRYX_TRAILRYX_KEY_PATH" || die "could not make $KEYRYX_TRAILRYX_KEY_PATH 0600."
   chmod 600 "$KEYRYX_WARDRYX_KEY_PATH" || die "could not make $KEYRYX_WARDRYX_KEY_PATH 0600."
+  # The record plane's directory exists before the witness reads it.
+  mkdir -p "$RECORDS_DIR" || warn "could not create $RECORDS_DIR; the witness will find no record to read until it exists."
+  # The record-seal digest: the policy names the credential by the SHA-256 of its bytes.
+  KEYRYX_TRAILRYX_DIGEST="$(file_sha "$KEYRYX_TRAILRYX_KEY_PATH")"
+  [ -n "$KEYRYX_TRAILRYX_DIGEST" ] \
+    || die "could not hash the record-seal credential; refusing to write a custody policy that names nobody."
 
-  # The policy names one consumer, wardryx, by the digest of its bearer key, and
-  # one held key it may sign with. The digest is public; the key stays in its file.
+  # The policy names two consumers, each by the digest of its bearer key, and the keys
+  # each may sign with: wardryx with wardryx-approval, and the record seal with
+  # trailryx-root, an ES384 key (the one trailryx v1.4.0's signer reads). The digests are
+  # public; the keys stay in their files.
   KEYRYX_WARDRYX_DIGEST="$(file_sha "$KEYRYX_WARDRYX_KEY_PATH")"
   [ -n "$KEYRYX_WARDRYX_DIGEST" ] \
     || die "could not hash wardryx's keyryx key; refusing to write a custody policy that names nobody."
   cat > "$KEYRYX_POLICY_PATH" <<JSON
 {"version": 1,
- "keys": [{"name": "wardryx-approval", "alg": "ES256"}],
+ "keys": [{"name": "wardryx-approval", "alg": "ES256"}, {"name": "trailryx-root", "alg": "ES384"}],
  "consumers": [{"name": "wardryx", "auth": {"key_digest": "sha256:$KEYRYX_WARDRYX_DIGEST"},
-                "grants": {"wardryx-approval": ["sign"]}}]}
+                "grants": {"wardryx-approval": ["sign"]}},
+               {"name": "record-seal", "auth": {"key_digest": "sha256:$KEYRYX_TRAILRYX_DIGEST"},
+                "grants": {"trailryx-root": ["sign"]}}]}
 JSON
 
   log "starting keyryx custody on :$KEYRYX_PORT (wardryx's approval key)"
@@ -2124,17 +2212,25 @@ JSON
     "$KEYRYX_BIN" custody > "$LOGS_DIR/keyryx.log" 2>&1 &
   register keyryx "$!" TERM
   # wardryx signs grants through custody and fails a grant it cannot sign (503,
-  # the hold stays pending), so a custody that does not answer stops the stand.
-  wait_health keyryx "$KEYRYX_PORT" "$!" \
-    || die "keyryx custody did not come up; wardryx cannot sign approvals without it, so the stand stops. See $LOGS_DIR/keyryx.log."
+  # the hold stays pending), so a custody that does not answer stops a run that has
+  # the policy plane. A run without it goes on, and its record is not signed this run.
+  if wait_health keyryx "$KEYRYX_PORT" "$!"; then
+    KEYRYX_SIGNING=1
+  elif [ "$WANT_POLICY" -eq 1 ]; then
+    die "keyryx custody did not come up; wardryx cannot sign approvals without it, so the stand stops. See $LOGS_DIR/keyryx.log."
+  else
+    warn "keyryx custody did not come up, so this run's record is NOT signed. See $LOGS_DIR/keyryx.log."
+  fi
 
-  # The witness reads the streams and the public key routes of custody, and its
-  # alerts stay in its own data directory: the shared bus is not written from here.
-  log "starting the keyryx witness on :$KEYRYX_WITNESS_PORT (reads the event streams, writes none of them)"
+  # The witness reads the streams, the record and the public key routes of custody, and
+  # its alerts stay in its own data directory: the shared bus is not written from here.
+  # It reads the seal's records directory under the tenant the seal writes (invariant 30).
+  log "starting the keyryx witness on :$KEYRYX_WITNESS_PORT (reads the event streams and the record, writes none of them)"
   KEYRYX_WITNESS_ADDR="127.0.0.1:$KEYRYX_WITNESS_PORT" \
   KEYRYX_WITNESS_DATA="$KEYRYX_WITNESS_DIR" \
   KEYRYX_WITNESS_ROOT_KEY_FILE="$KEYRYX_WITNESS_ROOT_KEY_PATH" \
   KEYRYX_WITNESS_EVENTS="$EVENTS_DIR" \
+  KEYRYX_WITNESS_RECORDS="$RECORDS_TENANT|$RECORDS_DIR" \
   KEYRYX_WITNESS_CUSTODY_URL="http://127.0.0.1:$KEYRYX_PORT" \
   KEYRYX_WITNESS_ALERTS="$KEYRYX_WITNESS_DIR/alerts.ndjson" \
     "$KEYRYX_BIN" witness > "$LOGS_DIR/keyryx-witness.log" 2>&1 &
@@ -2143,6 +2239,13 @@ JSON
   # and this says so, rather than stopping a stand that wardryx can use.
   wait_health keyryx-witness "$KEYRYX_WITNESS_PORT" "$!" \
     || warn "keyryx witness did not come up; this run's record is not witnessed. See $LOGS_DIR/keyryx-witness.log."
+fi
+
+# The record plane's signing state, for the scheduled seal. routines.sh reads it, because
+# a timer inherits no environment (invariant 30). "on" only when custody came up this run.
+if [ "$KEYRYX_SIGNING" -eq 1 ]; then SIGNING_STATE=on; else SIGNING_STATE=off; fi
+if ! mkdir -p "$KEYRYX_DIR" || ! printf '%s\n' "$SIGNING_STATE" > "$KEYRYX_DIR/record-signing"; then
+  warn "could not write $KEYRYX_DIR/record-signing; the scheduled seal will not sign its records."
 fi
 
 # --------------------------------------------------------------------------
@@ -2993,6 +3096,27 @@ if [ "$WANT_RECORDS" -eq 1 ]; then
   fi
 fi
 
+# seal_node <trailryx-node arguments>: every call to the record plane goes through here, so
+# the signer is set in one place (invariant 30). When keyryx is up for this run, custody
+# signs each sealed root under trailryx-root: TRAILRYX_SIGNER=keyryx, custody's URL, the
+# record-seal credential, and the folder the witness writes its attestations to. When it
+# is not, the signer variables are removed, so one exported in the caller's shell cannot
+# sign or queue a root by accident.
+# TODO(trailryx#112): TRAILRYX_KEYRYX_KID is not set. trailryx v1.4.0 does not read it, so
+# the kid of trailryx-root is not pinned here. Set it once a trailryx release reads it.
+seal_node() {
+  if [ "$KEYRYX_SIGNING" -eq 1 ]; then
+    TRAILRYX_SIGNER=keyryx \
+    TRAILRYX_KEYRYX_URL="http://127.0.0.1:$KEYRYX_PORT" \
+    TRAILRYX_KEYRYX_CREDENTIAL_FILE="$KEYRYX_TRAILRYX_KEY_PATH" \
+    TRAILRYX_WITNESS_ATTESTATIONS="$KEYRYX_WITNESS_DIR/attestations" \
+      "$NODE_BIN" "$@"
+  else
+    env -u TRAILRYX_SIGNER -u TRAILRYX_KEYRYX_URL -u TRAILRYX_KEYRYX_CREDENTIAL_FILE -u TRAILRYX_WITNESS_ATTESTATIONS \
+      "$NODE_BIN" "$@"
+  fi
+}
+
 RECORDS_WRITTEN=0
 RECORDS_LOST=0
 RECORDS_SEALED=0
@@ -3008,7 +3132,7 @@ if [ "$WANT_RECORDS" -eq 1 ]; then
   # the same directory heraldyx already reads as a whole for the same reason.
   shopt -s nullglob
   for ev in "$EVENTS_DIR"/*.ndjson; do
-    out="$("$NODE_BIN" events --file "$ev" --data "$RECORDS_DIR" --trust-domain "$DEMO_TRUST_DOMAIN" --seal-records 500 2>&1)"
+    out="$(seal_node events --file "$ev" --data "$RECORDS_DIR" --tenant "$RECORDS_TENANT" --trust-domain "$DEMO_TRUST_DOMAIN" --seal-records 500 2>&1)"
     rc=$?
     { printf -- '--- %s ---\n' "$ev"; printf '%s\n' "$out"; } >> "$LOGS_DIR/trailryx.log"
     if [ "$rc" -ne 0 ]; then
@@ -3039,8 +3163,8 @@ printf '  %-12s http://127.0.0.1:%s   %s\n' "gateway" "$GATEWAY_PORT" "Anthropic
 printf '  %-12s http://127.0.0.1:%s   %s\n' "cloud"   "$CLOUD_PORT"   "money-plane API (bearer: the cloud key below)"
 [ -n "$DASH_URL" ]                 && printf '  %-12s http://127.0.0.1:%s\n' "dashboard" "$DASH_PORT"
 [ "$WANT_POLICY" -eq 1 ]           && printf '  %-12s http://127.0.0.1:%s   %s\n' "wardryx" "$WARDRYX_PORT" "policy decision point"
-[ "$WANT_POLICY" -eq 1 ]           && printf '  %-12s http://127.0.0.1:%s   %s\n' "keyryx" "$KEYRYX_PORT" "key custody (wardryx's approval key)"
-[ "$WANT_POLICY" -eq 1 ]           && printf '  %-12s http://127.0.0.1:%s   %s\n' "keyryx-wit" "$KEYRYX_WITNESS_PORT" "witness of the record (reads, writes nothing)"
+[ "$KEYRYX_SIGNING" -eq 1 ]        && printf '  %-12s http://127.0.0.1:%s   %s\n' "keyryx" "$KEYRYX_PORT" "key custody (wardryx's approval key; signs each sealed record's root)"
+[ "$WANT_KEYRYX" -eq 1 ]           && printf '  %-12s http://127.0.0.1:%s   %s\n' "keyryx-wit" "$KEYRYX_WITNESS_PORT" "witness of the record (reads, writes nothing)"
 [ "$WANT_IDENTITY" -eq 1 ]         && printf '  %-12s http://127.0.0.1:%s   %s\n' "idryx"   "$IDRYX_PORT"   "identity graph (/api/identities)"
 
 if [ "${#TOOLS_INSTALLED[@]}" -gt 0 ]; then
@@ -3151,10 +3275,21 @@ if [ "$WANT_RECORDS" -eq 1 ]; then
   echo
   log "record:  $RECORDS_WRITTEN record(s) sealed across $RECORDS_SEALED segment(s) in $RECORDS_DIR"
   log "         $RECORDS_LOST line(s) produced no record (trailryx-agentevent documents why; this is expected, not an error)"
+  # What the record is, said once: signed through keyryx, or unsigned under the opt-out
+  # (the weaker setting) or because custody did not come up this run (invariant 30).
+  if [ "$WITHOUT_KEYRYX" -eq 1 ]; then
+    warn "record: UNSIGNED. --without-keyryx is the weaker setting: the record pack is unsigned, and nothing witnesses the record. Run without the flag to sign it through keyryx."
+  elif [ "$KEYRYX_SIGNING" -eq 1 ]; then
+    log "         signed through keyryx: custody signs each sealed root under trailryx-root (ES384), and the witness reads the record from its own process"
+  else
+    warn "record: UNSIGNED this run, because keyryx did not come up (see the warning above and $LOGS_DIR/keyryx.log): the record pack is unsigned."
+  fi
   log "read it back with a completeness proof:"
-  printf '  %s read --data %s --all\n' "$NODE_BIN" "$RECORDS_DIR"
+  printf '  %s read --data %s --tenant %s --all\n' "$NODE_BIN" "$RECORDS_DIR" "$RECORDS_TENANT"
   log "pack it and check it offline, no network, no config, no state:"
-  printf '  %s read --data %s --all --pack %s/trailryx.pack\n' "$NODE_BIN" "$RECORDS_DIR" "$RECORDS_DIR"
+  pack_env=""
+  [ "$KEYRYX_SIGNING" -eq 1 ] && pack_env="TRAILRYX_WITNESS_ATTESTATIONS=$KEYRYX_WITNESS_DIR/attestations "
+  printf '  %s%s read --data %s --tenant %s --all --pack %s/trailryx.pack\n' "$pack_env" "$NODE_BIN" "$RECORDS_DIR" "$RECORDS_TENANT" "$RECORDS_DIR"
   printf '  %s %s/trailryx.pack\n' "$VERIFY_BIN" "$RECORDS_DIR"
 fi
 log "send it traffic by pointing an agent's Anthropic base URL at the gateway (see README.md)."

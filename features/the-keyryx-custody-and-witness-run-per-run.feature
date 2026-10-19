@@ -1,11 +1,13 @@
-# @decided 2026-10-18 (paraphrased): keyryx's key custody and its witness of the record run in this launcher for each run, from separate data and separate root keys, and wardryx signs its approvals through custody.
+# @decided 2026-10-18 (paraphrased): keyryx's key custody and its witness of the record run in this launcher, from separate data and separate root keys, and wardryx signs its approvals through custody.
+# @decided 2026-10-19 (paraphrased): the root keys are kept across runs, not minted fresh each run (the record-is-signed-by-default feature holds the rest).
 # Scenarios are bound to cases in scripts/gates-have-teeth.sh by name, and scripts/features-are-bound.sh holds the binding both ways.
-Feature: keyryx runs per run, with custody and the witness kept apart, and no key value leaves the launcher
+Feature: keyryx runs in every install, with custody and the witness kept apart, and no key value leaves the launcher
 
   Custody holds the key wardryx signs approvals with. The witness reads the event
   streams from its own process and holds nothing custody signs with. This launcher
-  gives each run fresh data directories and fresh root keys, writes the key files
-  for the operator's user only, and never prints a key value.
+  gives custody and the witness separate data directories and separate root keys,
+  kept across runs, writes the key files for the operator's user only, and never
+  prints a key value.
 
   Scenario: custody and the witness are two processes with separate data and separate root keys
     Given the keyryx starts in up.sh
@@ -15,7 +17,7 @@ Feature: keyryx runs per run, with custody and the witness kept apart, and no ke
     # -> gates-have-teeth.sh "keyryx-is-per-run: custody takes its root key from a literal"
     # -> gates-have-teeth.sh "keyryx-is-per-run: the witness takes custody's root key"
 
-  Scenario: each root key is minted for the run before custody starts, and refused when empty
+  Scenario: each root key is minted once, before custody starts, and refused when empty
     Given the custody and witness root keys in up.sh
     When a root key is a fixed string, has no refusal on an empty value, or is minted after custody has started
     Then keyryx-is-per-run.sh fails

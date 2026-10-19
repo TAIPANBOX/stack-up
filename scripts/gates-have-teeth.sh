@@ -1775,6 +1775,111 @@ run_case "pins-are-release-tags: a comment that names locate_repo is not a fault
 	'./scripts/pins-are-release-tags.sh' \
 	"$(py 'edit("up.sh", "GH=\"https://github.com/TAIPANBOX\"\n", "GH=\"https://github.com/TAIPANBOX\"\n# locate_repo reads a sibling checkout; only --from-main reaches it.\n")')"
 
+run_case "record-is-signed-by-default: keyryx is off by default" fail \
+	'./scripts/record-is-signed-by-default.sh' \
+	"$(py 'edit("up.sh", "\nWANT_KEYRYX=1\n", "\nWANT_KEYRYX=0\n")')" \
+	"keyryx is not on by default"
+
+run_case "record-is-signed-by-default: --without-keyryx is not a flag" fail \
+	'./scripts/record-is-signed-by-default.sh' \
+	"$(py 'edit("up.sh", "--without-keyryx) WITHOUT_KEYRYX=1 ;;", "--without-keyryx) WITHOUT_KEYRYX=0 ;;")')" \
+	"is not a flag that sets WITHOUT_KEYRYX=1"
+
+run_case "record-is-signed-by-default: --without-keyryx does not switch keyryx off" fail \
+	'./scripts/record-is-signed-by-default.sh' \
+	"$(py 'edit("up.sh", "[ \"$WITHOUT_KEYRYX\" -eq 1 ] && WANT_KEYRYX=0", "[ \"$WITHOUT_KEYRYX\" -eq 2 ] && WANT_KEYRYX=0")')" \
+	"does not switch WANT_KEYRYX off"
+
+run_case "record-is-signed-by-default: the keyryx block is not under WANT_KEYRYX" fail \
+	'./scripts/record-is-signed-by-default.sh' \
+	"$(py 'edit("up.sh", "KEYRYX_SIGNING=0\nif [ \"$WANT_KEYRYX\" -eq 1 ]; then", "KEYRYX_SIGNING=0\nif [ \"$WANT_POLICY\" -eq 1 ]; then")')" \
+	"does not start under WANT_KEYRYX"
+
+run_case "record-is-signed-by-default: a seal call bypasses seal_node" fail \
+	'./scripts/record-is-signed-by-default.sh' \
+	"$(py 'edit("up.sh", "out=\"$(seal_node events --file", "out=\"$(\"$NODE_BIN\" events --file")')" \
+	"names the node binary bare"
+
+run_case "record-is-signed-by-default: seal_node drops the signer when signing" fail \
+	'./scripts/record-is-signed-by-default.sh' \
+	"$(py 'edit("up.sh", "TRAILRYX_SIGNER=keyryx \\\n    TRAILRYX_KEYRYX_URL", "TRAILRYX_SIGNER_OFF=keyryx \\\n    TRAILRYX_KEYRYX_URL")')" \
+	"does not set TRAILRYX_SIGNER=keyryx when signing"
+
+run_case "record-is-signed-by-default: seal_node keeps the signer when not signing" fail \
+	'./scripts/record-is-signed-by-default.sh' \
+	"$(py 'edit("up.sh", "env -u TRAILRYX_SIGNER -u TRAILRYX_KEYRYX_URL", "env -u TRAILRYX_KEYRYX_URL")')" \
+	"does not remove TRAILRYX_SIGNER when not signing"
+
+run_case "record-is-signed-by-default: a routine seal runs the node binary bare" fail \
+	'./scripts/record-is-signed-by-default.sh' \
+	"$(py 'edit("routines.sh", "out=\"$(trailryx_node events --file", "out=\"$(\"$node\" events --file")')" \
+	"runs the node binary bare for a seal call"
+
+run_case "record-is-signed-by-default: the scheduled seal does not sign" fail \
+	'./scripts/record-is-signed-by-default.sh' \
+	"$(py 'edit("routines.sh", "    TRAILRYX_SIGNER=keyryx \\\n    TRAILRYX_KEYRYX_URL=", "    TRAILRYX_SIGNER_OFF=keyryx \\\n    TRAILRYX_KEYRYX_URL=")')" \
+	"trailryx_node does not set TRAILRYX_SIGNER=keyryx when signing"
+
+run_case "record-is-signed-by-default: seal_node is renamed away (measured nothing)" fail \
+	'./scripts/record-is-signed-by-default.sh' \
+	"$(py 'edit("up.sh", "seal_node() {", "seal_nodx() {")')" \
+	"defines no seal_node: measured nothing"
+
+run_case "record-is-signed-by-default: the witness does not read the seal's records" fail \
+	'./scripts/record-is-signed-by-default.sh' \
+	"$(py 'edit("up.sh", "KEYRYX_WITNESS_RECORDS=\"$RECORDS_TENANT|$RECORDS_DIR\"", "KEYRYX_WITNESS_RECORDS_OFF=\"$RECORDS_TENANT|$RECORDS_DIR\"")')" \
+	"does not read the seal's records"
+
+run_case "record-is-signed-by-default: the seal names no tenant the witness reads" fail \
+	'./scripts/record-is-signed-by-default.sh' \
+	"$(py 'edit("up.sh", "--data \"$RECORDS_DIR\" --tenant \"$RECORDS_TENANT\" --trust-domain", "--data \"$RECORDS_DIR\" --trust-domain")')" \
+	"does not name the tenant the witness reads"
+
+run_case "record-is-signed-by-default: RECORDS_TENANT names another tenant than trailryx's default" fail \
+	'./scripts/record-is-signed-by-default.sh' \
+	"$(py 'edit("up.sh", "RECORDS_TENANT=\"acme\"\n", "RECORDS_TENANT=\"acme2\"\n")')" \
+	"RECORDS_TENANT is not set to the tenant the seal writes"
+
+run_case "record-is-signed-by-default: the root keys are wiped every run" fail \
+	'./scripts/record-is-signed-by-default.sh' \
+	"$(py 'edit("up.sh", "  mkdir -p \"$KEYRYX_CUSTODY_DIR\" \"$KEYRYX_WITNESS_DIR\"", "  rm -rf \"$KEYRYX_DIR\"\n  mkdir -p \"$KEYRYX_CUSTODY_DIR\" \"$KEYRYX_WITNESS_DIR\"")')" \
+	"wipes \$KEYRYX_DIR every run"
+
+run_case "record-is-signed-by-default: the record-seal credential is minted every run" fail \
+	'./scripts/record-is-signed-by-default.sh' \
+	"$(py 'edit("up.sh", "  if [ -s \"$KEYRYX_TRAILRYX_KEY_PATH\" ]; then", "  if [ -n \"$KEYRYX_TRAILRYX_KEY_PATH\" ]; then")')" \
+	"is not minted once"
+
+run_case "record-is-signed-by-default: trailryx-root is not an ES384 key" fail \
+	'./scripts/record-is-signed-by-default.sh' \
+	"$(py 'edit("up.sh", "\x7b\"name\": \"trailryx-root\", \"alg\": \"ES384\"\x7d", "\x7b\"name\": \"trailryx-root\", \"alg\": \"ES256\"\x7d")')" \
+	"does not declare trailryx-root as an ES384 key"
+
+run_case "record-is-signed-by-default: record-seal is granted more than sign" fail \
+	'./scripts/record-is-signed-by-default.sh' \
+	"$(py 'edit("up.sh", "\"grants\": \x7b\"trailryx-root\": [\"sign\"]\x7d\x7d]\x7d", "\"grants\": \x7b\"trailryx-root\": [\"sign\", \"delegate\"]\x7d\x7d]\x7d")')" \
+	"is not granted sign on trailryx-root alone"
+
+run_case "record-is-signed-by-default: the opt-out does not say the record pack is unsigned" fail \
+	'./scripts/record-is-signed-by-default.sh' \
+	"$(py 'edit("up.sh", "--without-keyryx is the weaker setting: the record pack is unsigned", "--without-keyryx is the stronger setting: the record pack is unsigned")')" \
+	"does not say, under --without-keyryx"
+
+run_case "record-is-signed-by-default: the launch plan does not name the signing mode" fail \
+	'./scripts/record-is-signed-by-default.sh' \
+	"$(py 'edit("up.sh", "launch: record signing: off", "launch: signing: off")
+edit("up.sh", "launch: record signing: keyryx", "launch: signing: keyryx")')" \
+	"does not name the record signing mode"
+
+run_case "record-is-signed-by-default: the signing state is written to another name" fail \
+	'./scripts/record-is-signed-by-default.sh' \
+	"$(py 'edit("up.sh", "\"$KEYRYX_DIR/record-signing\"; then", "\"$KEYRYX_DIR/record-signing-x\"; then")')" \
+	"does not write the record signing state"
+
+run_case "record-is-signed-by-default: a comment that names the node binary is not a fault" pass \
+	'./scripts/record-is-signed-by-default.sh' \
+	"$(py 'edit("up.sh", "\nRECORDS_WRITTEN=0\n", "\n# \"$NODE_BIN\" events is what seal_node runs; this comment is not a call.\nRECORDS_WRITTEN=0\n")')"
+
 echo
 if [ -n "$(git status --porcelain)" ]; then
 	printf 'FAIL: this script left the tree dirty, so it cannot be trusted about anything above\n'

@@ -28,7 +28,7 @@ one is tagged.
 Every change passes the repository's gates before merge: `shellcheck up.sh
 down.sh routines.sh`, `bash -n` on all three, `scripts/loopback-only.sh`,
 `scripts/gateway-cache-is-off.sh`, `scripts/cloud-key-is-per-run.sh`, `scripts/cloud-key-is-not-printed.sh`, `scripts/admin-keys-are-per-run.sh`,
-`scripts/postures-are-held.sh`, `scripts/keyryx-is-per-run.sh`, `scripts/wardryx-fails-closed.sh`, `scripts/typed-mode.sh`,
+`scripts/postures-are-held.sh`, `scripts/keyryx-is-per-run.sh`, `scripts/record-is-signed-by-default.sh`, `scripts/wardryx-fails-closed.sh`, `scripts/typed-mode.sh`,
 `scripts/run-budget-ceiling-is-set.sh`, `scripts/bus-files-match-sources.sh`,
 `scripts/chain-verify-routine.sh`, `scripts/manifest-is-true.sh`,
 `scripts/features-are-bound.sh`, `scripts/die-keeps-its-exit-status.sh`, `scripts/demo-issuer-is-unbound.sh`,

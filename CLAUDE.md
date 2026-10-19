@@ -38,6 +38,7 @@ bash -n up.sh && bash -n down.sh && bash -n routines.sh
 ./scripts/postures-are-held.sh
 ./scripts/keyryx-is-per-run.sh
 ./scripts/record-is-signed-by-default.sh
+./scripts/record-key-is-pinned.sh
 ./scripts/wardryx-fails-closed.sh
 ./scripts/firewall-is-enforce.sh
 ./scripts/pii-is-shadow.sh
@@ -581,8 +582,8 @@ building here and the thing that most often gets skipped.
     and an independent witness of the record, both off every request path, with wardryx's approvals
     signed by custody and not by a shared secret. `@claude 2026-10-18`: the shape here is my reading of
     that decision for a launcher, not a stated decision. `up.sh` builds keyryx from the commit that
-    tag and commit in the pin table names, refused unless the clone is that commit (invariant 29), because keyryx v0.1.1 publishes a
-    container image and no binary and this launcher runs no containers. It mints the bearer key wardryx
+    tag and commit in the pin table names, refused unless the clone is that commit (invariant 29), because keyryx's releases are
+    container images with no binary and this launcher runs no containers. The pin is keyryx v0.1.2 (invariant 31). It mints the bearer key wardryx
     presents to custody per run (`rand_hex 24`, written with no trailing newline, refused when empty),
     and the custody and witness root keys (`rand_hex 32`, each in its own 0600 file under
     `$STACK_UP_HOME/keyryx`) once, when their file is absent. `@decided 2026-10-19` (paraphrased): the
@@ -733,9 +734,8 @@ building here and the thing that most often gets skipped.
     default). The scheduled seal reads `$STACK_UP_HOME/keyryx/record-signing`, which each run writes, because
     a timer inherits no environment. The opt-out, and a custody that does not come up on a run without the
     policy plane, both say the record pack is unsigned. A custody that does not come up on a run with the
-    policy plane still stops the run, as before. Named, not done: `TRAILRYX_KEYRYX_KID` (trailryx#112, not
-    released) is a TODO line in up.sh; and a rotation of `trailryx-root` is not supported, since trailryx
-    v1.4.0 refuses a key set that holds two keys.
+    policy plane still stops the run, as before. The pin the signer needs (`TRAILRYX_KEYRYX_KID`, trailryx
+    v1.5.0 refuses a keyryx signer without it) is taken from custody by invariant 31.
     *(gate: `scripts/record-is-signed-by-default.sh`: the flag and the on-by-default switch; the custody start
     inside the keyryx block; every trailryx-node call in up.sh and routines.sh through the one function, which
     sets the signer when signing and removes it when not; the witness's records directory and the seal's
@@ -743,8 +743,35 @@ building here and the thing that most often gets skipped.
     keys and the credential are kept, not wiped; the closing output and the launch plan name the opt-out; the
     scheduled seal reads the state up.sh writes. 21 cases in `gates-have-teeth.sh`, 20 fault and 1 pass;
     `features/the-record-is-signed-by-default.feature`, 7 scenarios. Not covered: a live custody signing a root
-    and the witness attesting one, which need built binaries; that the pinned trailryx reads
-    TRAILRYX_KEYRYX_KID; and the rotation of trailryx-root.)*
+    and the witness attesting one, which need built binaries.)*
+
+31. **The record seal is pinned to the key custody signs trailryx-root with, taken from custody, checked against its active key, and moved only by `--repin-record-key`.**
+    `@decided 2026-10-19` (paraphrased): the seal signs under one key the operator's launcher names, the pin is
+    kept across runs, and it changes only when the operator rotates on purpose. `@claude 2026-10-19`: the rule
+    for taking the pin (exactly one P-384 key at install, which must be the active key, and a kept pin only while
+    it is the active key) is my reading of trailryx v1.5.0's pin (`TRAILRYX_KEYRYX_KID`, the RFC 7638 thumbprint,
+    a key set in rotation read for the pinned key only) and of keyryx v0.1.2's key set and state. The launcher
+    reads custody's `/v1/jwks/trailryx-root` and `/v1/state` once custody answers, takes the kid of the one
+    P-384 key (checked against its RFC 7638 thumbprint), and keeps it in `$KEYRYX_DIR/trailryx.kid`, 0600, under
+    `umask 077`. A refusal names its reason, and the record of that run is not signed. A rotation is never
+    followed silently: once custody's active key is no longer the pinned one, the run refuses and says to rotate
+    on purpose with `--repin-record-key`, which moves the pin to the active key and needs keyryx to run. Both
+    `seal_node` (up.sh) and `trailryx_node` (routines.sh) pass the pin with the signer, and drop it when they do
+    not sign. The kid is a public thumbprint and may be logged; the key set and the state are never logged.
+    `@claude 2026-10-19`: the pin is the trailryx v1.5.0 release's own contract, so the launcher pins that release
+    (tag v1.5.0 at cf2439de8dc4b65ebad589e92ae4b9dd6dcac536) and keyryx v0.1.2 (tag at 21edb5c6744416cc0705434e9d0dc3489cc0c61e,
+    attestations 0640).
+    *(gate: `scripts/record-key-is-pinned.sh`: the trailryx and keyryx pins; record_key_pin reads custody's
+    trailryx-root key set and state and takes the active key, checks each P-384 kid against its RFC 7638
+    thumbprint, refuses on the reasons its text names, checks a kept pin, an install pin and a repin against the
+    active key and the key set, keeps the file private under umask 077 and chmod 600; `--repin-record-key` is a
+    flag refused without keyryx; seal_node and trailryx_node pass TRAILRYX_KEYRYX_KID when signing and remove it
+    when not; signing is set only after the pin is taken; no log line names the key set or the state; the TODO for
+    trailryx#112 is gone. 19 fault cases and 1 pass case in `gates-have-teeth.sh`;
+    `features/the-record-key-is-pinned.feature`, 6 scenarios. Not covered: that custody's active key is the one
+    trailryx v1.5.0 verifies a live signature against (a running custody and trailryx, not run here); that a
+    rotation of trailryx-root followed by `--repin-record-key` is accepted by a live seal; the thumbprint agreement
+    with trailryx's own `thumbprint_p384` (read in its source, not run, the canonical form is the same).)*
 
 An approved architecture decision is **not finished** until it is two things: a
 numbered invariant in this file, and a gate in a script if it can be checked

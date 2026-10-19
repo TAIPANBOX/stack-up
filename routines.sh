@@ -650,19 +650,26 @@ routine_chain_verify() {
 # trailryx_node <trailryx-node arguments>: every call this routine makes to the record plane
 # goes through here, signed the way up.sh signs its seal (invariant 30). A timer inherits no
 # environment, so up.sh writes $STACK_UP_HOME/keyryx/record-signing, "on" only when keyryx
-# custody came up in its last run, and this reads that file. Anything else, or a missing
-# credential, runs with the signer variables removed. A root that cannot reach custody is
+# custody came up in its last run, and this reads that file. The pin (TRAILRYX_KEYRYX_KID, invariant
+# 31) is up.sh's kept pin in $STACK_UP_HOME/keyryx/trailryx.kid, and trailryx v1.5.0 refuses a
+# keyryx signer without it, so a missing pin means unsigned, not a failed seal. Anything else, or
+# a missing credential, runs with the signer variables removed. A root that cannot reach custody is
 # queued by the node and signed when custody answers; the records are sealed either way.
 trailryx_node() {
-  local keyryx_dir="$STACK_UP_HOME/keyryx"
-  if [ "$(cat "$keyryx_dir/record-signing" 2>/dev/null)" = "on" ] && [ -s "$keyryx_dir/trailryx.key" ]; then
+  local keyryx_dir="$STACK_UP_HOME/keyryx" kid=""
+  if [ "$(cat "$keyryx_dir/record-signing" 2>/dev/null)" = "on" ] && [ -s "$keyryx_dir/trailryx.key" ] \
+     && [ -s "$keyryx_dir/trailryx.kid" ]; then
+    kid="$(cat "$keyryx_dir/trailryx.kid")"
+  fi
+  if [ -n "$kid" ]; then
     TRAILRYX_SIGNER=keyryx \
     TRAILRYX_KEYRYX_URL="http://127.0.0.1:4340" \
+    TRAILRYX_KEYRYX_KID="$kid" \
     TRAILRYX_KEYRYX_CREDENTIAL_FILE="$keyryx_dir/trailryx.key" \
     TRAILRYX_WITNESS_ATTESTATIONS="$keyryx_dir/witness/attestations" \
       "$BIN_DIR/trailryx-node" "$@"
   else
-    env -u TRAILRYX_SIGNER -u TRAILRYX_KEYRYX_URL -u TRAILRYX_KEYRYX_CREDENTIAL_FILE -u TRAILRYX_WITNESS_ATTESTATIONS \
+    env -u TRAILRYX_SIGNER -u TRAILRYX_KEYRYX_URL -u TRAILRYX_KEYRYX_KID -u TRAILRYX_KEYRYX_CREDENTIAL_FILE -u TRAILRYX_WITNESS_ATTESTATIONS \
       "$BIN_DIR/trailryx-node" "$@"
   fi
 }

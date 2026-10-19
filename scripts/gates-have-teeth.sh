@@ -1880,6 +1880,105 @@ run_case "record-is-signed-by-default: a comment that names the node binary is n
 	'./scripts/record-is-signed-by-default.sh' \
 	"$(py 'edit("up.sh", "\nRECORDS_WRITTEN=0\n", "\n# \"$NODE_BIN\" events is what seal_node runs; this comment is not a call.\nRECORDS_WRITTEN=0\n")')"
 
+run_case "record-key-is-pinned: the trailryx pin is not v1.5.0" fail \
+	'./scripts/record-key-is-pinned.sh' \
+	"$(py 'edit("up.sh", "trailryx)       echo \"v1.5.0 cf2439de8dc4b65ebad589e92ae4b9dd6dcac536\"", "trailryx)       echo \"v1.4.0 8e3bb7b454aed49b2bb20e975e63ec54136cc17d\"")')" \
+	"the trailryx pin is not v1.5.0"
+
+run_case "record-key-is-pinned: the keyryx pin is not v0.1.2" fail \
+	'./scripts/record-key-is-pinned.sh' \
+	"$(py 'edit("up.sh", "keyryx)         echo \"v0.1.2 21edb5c6744416cc0705434e9d0dc3489cc0c61e\"", "keyryx)         echo \"v0.1.1 7384897fff61738cfa9dbbe54c24061dbe65251b\"")')" \
+	"the keyryx pin is not v0.1.2"
+
+run_case "record-key-is-pinned: record_key_pin does not read custody's trailryx-root key set" fail \
+	'./scripts/record-key-is-pinned.sh' \
+	"$(py 'edit("up.sh", "/v1/jwks/trailryx-root", "/v1/jwks/trailryx-roo")')" \
+	"does not read custody's trailryx-root key set"
+
+run_case "record-key-is-pinned: record_key_pin does not read custody's state" fail \
+	'./scripts/record-key-is-pinned.sh' \
+	"$(py 'edit("up.sh", "$KEYRYX_PORT/v1/state\"", "$KEYRYX_PORT/v1/statx\"")')" \
+	"does not read custody's state"
+
+run_case "record-key-is-pinned: the install pin is not checked against the active key" fail \
+	'./scripts/record-key-is-pinned.sh' \
+	"$(py 'edit("up.sh", "if es384[0] != active:", "if False:")')" \
+	"does not check the install pin against the active key"
+
+run_case "record-key-is-pinned: a kept pin is not checked against the active key" fail \
+	'./scripts/record-key-is-pinned.sh' \
+	"$(py 'edit("up.sh", "if pinned != active:", "if False:")')" \
+	"does not check a kept pin against the active key"
+
+run_case "record-key-is-pinned: a repin is not checked against the key set" fail \
+	'./scripts/record-key-is-pinned.sh' \
+	"$(py 'edit("up.sh", "if active not in es384:", "if False:")')" \
+	"does not check a repin against the key set"
+
+run_case "record-key-is-pinned: a kid is not checked against its RFC 7638 thumbprint" fail \
+	'./scripts/record-key-is-pinned.sh' \
+	"$(py 'edit("up.sh", "if not sized or key.get(\"kid\") != thumbprint(key):", "if not sized:")')" \
+	"does not check the kid against its RFC 7638 thumbprint"
+
+run_case "record-key-is-pinned: the pin file is not kept private" fail \
+	'./scripts/record-key-is-pinned.sh' \
+	"$(py 'edit("up.sh", "chmod 600 \"$KEYRYX_RECORD_KID_FILE\"", "chmod 644 \"$KEYRYX_RECORD_KID_FILE\"")')" \
+	"does not keep the pin file private"
+
+run_case "record-key-is-pinned: the pin is not written under umask 077" fail \
+	'./scripts/record-key-is-pinned.sh' \
+	"$(py 'edit("up.sh", "( umask 077; printf", "( umask 022; printf")')" \
+	"does not write the pin under umask 077"
+
+run_case "record-key-is-pinned: --repin-record-key is not a flag" fail \
+	'./scripts/record-key-is-pinned.sh' \
+	"$(py 'edit("up.sh", "--repin-record-key) REPIN_RECORD_KEY=1 ;;", "--repin-record-key) REPIN_RECORD_KEY=0 ;;")')" \
+	"is not a flag that sets REPIN_RECORD_KEY=1"
+
+run_case "record-key-is-pinned: --repin-record-key is allowed without keyryx" fail \
+	'./scripts/record-key-is-pinned.sh' \
+	"$(py 'edit("up.sh", "--repin-record-key needs keyryx, and --without-keyryx turns keyryx off", "--repin-record-key is allowed, and --without-keyryx turns keyryx off")')" \
+	"is not refused without keyryx"
+
+run_case "record-key-is-pinned: seal_node does not pass the pinned kid" fail \
+	'./scripts/record-key-is-pinned.sh' \
+	"$(py 'edit("up.sh", "TRAILRYX_KEYRYX_KID=\"$KEYRYX_RECORD_KID\"", "TRAILRYX_KEYRYX_KIDX=\"$KEYRYX_RECORD_KID\"")')" \
+	"does not pass the pinned kid"
+
+run_case "record-key-is-pinned: seal_node keeps the pin when not signing" fail \
+	'./scripts/record-key-is-pinned.sh' \
+	"$(py 'edit("up.sh", " -u TRAILRYX_KEYRYX_KID -u TRAILRYX_KEYRYX_CREDENTIAL_FILE", " -u TRAILRYX_KEYRYX_CREDENTIAL_FILE")')" \
+	"does not remove TRAILRYX_KEYRYX_KID when not signing"
+
+run_case "record-key-is-pinned: trailryx_node does not pass the pinned kid" fail \
+	'./scripts/record-key-is-pinned.sh' \
+	"$(py 'edit("routines.sh", "TRAILRYX_KEYRYX_KID=\"$kid\"", "TRAILRYX_KEYRYX_KIDX=\"$kid\"")')" \
+	"trailryx_node does not pass the pinned kid when signing"
+
+run_case "record-key-is-pinned: trailryx_node does not read the pin file" fail \
+	'./scripts/record-key-is-pinned.sh' \
+	"$(py 'edit("routines.sh", "kid=\"$(cat \"$keyryx_dir/trailryx.kid\")\"", "kid=\"$(cat \"$keyryx_dir/trailryx.pin\")\"")')" \
+	"trailryx_node does not read the pin file"
+
+run_case "record-key-is-pinned: the pin is never taken before signing" fail \
+	'./scripts/record-key-is-pinned.sh' \
+	"$(py 'edit("up.sh", "if record_key_pin; then", "if true; then")')" \
+	"is never called"
+
+run_case "record-key-is-pinned: a log line names the key set" fail \
+	'./scripts/record-key-is-pinned.sh' \
+	"$(py 'edit("up.sh", "  keyset_json=\"$(curl -fsS --max-time 5", "  log \"$keyset_json\"\n  keyset_json=\"$(curl -fsS --max-time 5")')" \
+	"names the key set or the state document"
+
+run_case "record-key-is-pinned: the released TODO is back" fail \
+	'./scripts/record-key-is-pinned.sh' \
+	"$(py 'edit("up.sh", "seal_node() {", "# TODO(trailryx#112): back\nseal_node() {")')" \
+	"TODO(trailryx#112) is still in up.sh"
+
+run_case "record-key-is-pinned: a comment that names the pin is not a fault" pass \
+	'./scripts/record-key-is-pinned.sh' \
+	"$(py 'edit("up.sh", "\nRECORDS_WRITTEN=0\n", "\n# record_key_pin is what pins this key; this comment is not a call.\nRECORDS_WRITTEN=0\n")')"
+
 echo
 if [ -n "$(git status --porcelain)" ]; then
 	printf 'FAIL: this script left the tree dirty, so it cannot be trusted about anything above\n'

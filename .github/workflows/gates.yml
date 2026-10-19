@@ -57,6 +57,9 @@ jobs:
       - name: the sealed record is signed through keyryx by default, and the opt-out says the record is unsigned
         run: ./scripts/record-is-signed-by-default.sh
 
+      - name: the record seal is pinned to custody's active trailryx-root key, and moves only by --repin-record-key
+        run: ./scripts/record-key-is-pinned.sh
+
       - name: the gateway fails closed on wardryx, and the launcher stops when wardryx does not come up
         run: ./scripts/wardryx-fails-closed.sh
 

@@ -149,6 +149,10 @@
 #                       clamped. A positive decimal, at most six decimals;
 #                       anything else exits 2 before anything is built. Needs a
 #                       gateway built from tokenfuse v1.5.0 or newer.
+#   --repin-record-key  moves the record seal's pin (TRAILRYX_KEYRYX_KID) to custody's
+#                       active trailryx-root key, after a rotation. Without it the pin
+#                       is kept while it is the active key, and a rotated-past pin is
+#                       refused with the reason (invariant 31). Needs keyryx to run.
 #   --without-keyryx    turns keyryx off. keyryx is part of every install: custody
 #                       signs each sealed record's root under trailryx-root and the
 #                       witness reads the record (invariant 30). With this flag the
@@ -263,14 +267,15 @@ KEYRYX_TRAILRYX_KEY_PATH="$KEYRYX_DIR/trailryx.key"
 #
 # Each line was read from the repository's own remote on 2026-10-19: git
 # ls-remote --tags, the peeled commit of the tag. scripts/pins-are-release-tags.sh
-# holds the format. keyryx publishes v0.1.1 as a container image and no binary, so
-# its commit is built here with go build, and this launcher runs no containers.
+# holds the format. keyryx's releases have been container images with no binary, so its
+# commit is built here with go build, and this launcher runs no containers. The digest a
+# release pins is the commit its tag names (invariant 29).
 #
 # verdryx published its first release, v0.1.0, on 2026-10-19; before that it had no line
 # and was built only with --from-main.
 pin_of() {
   case "$1" in
-    keyryx)         echo "v0.1.1 7384897fff61738cfa9dbbe54c24061dbe65251b" ;;
+    keyryx)         echo "v0.1.2 21edb5c6744416cc0705434e9d0dc3489cc0c61e" ;;
     tokenfuse)      echo "v1.19.0 84eabe61b0d5785d5198192c296ab1c58ab346bb" ;;
     wardryx)        echo "v2.4.0 811da4a504e0f4a4918a733f86d5b787303e7f86" ;;
     vouchryx)       echo "v0.6.0 d60e300edb8187482847fec30f188b0d561f5519" ;;
@@ -279,7 +284,7 @@ pin_of() {
     scopyx)         echo "v1.1.0 b23266e36902260a149a615cc8061a2dfee4969c" ;;
     costcrew)       echo "v0.10.0 a3549f2997953e92d01658758c831f5dc92776a3" ;;
     typryx)         echo "v0.5.0 d5d4c0c331f4829dd564e9ee8505583cdb52dbf9" ;;
-    trailryx)       echo "v1.4.0 8e3bb7b454aed49b2bb20e975e63ec54136cc17d" ;;
+    trailryx)       echo "v1.5.0 cf2439de8dc4b65ebad589e92ae4b9dd6dcac536" ;;
     qryx)           echo "v1.1.0 e2e776d648aa28ffa9971bb21bc828335c86a89c" ;;
     mockryx)        echo "v0.3.0 14c954dcf8dbcca40b2fa28c5cf202372b8480fc" ;;
     agent-stack-go) echo "v2.0.1 e52e7fc98d77996429543d342b9bf9e7899304a0" ;;
@@ -416,6 +421,9 @@ FORCE_INSTALL=0
 # root and the witness reads it. --without-keyryx turns it off, from the flag only,
 # never from the caller's environment. The record pack is then unsigned.
 WITHOUT_KEYRYX=0
+# --repin-record-key moves the record seal's pin to custody's active trailryx-root key (invariant
+# 31). Without it a kept pin is kept, and a pin custody has rotated past is refused with a reason.
+REPIN_RECORD_KEY=0
 # --from-main builds sibling or main checkouts instead of the pinned releases (the
 # pin table above). A developer switch: it is never the default, and it says so.
 FROM_MAIN=0
@@ -466,6 +474,7 @@ while [ $# -gt 0 ]; do
     --force-install) FORCE_INSTALL=1 ;;
     --from-main) FROM_MAIN=1 ;;
     --without-keyryx) WITHOUT_KEYRYX=1 ;;
+    --repin-record-key) REPIN_RECORD_KEY=1 ;;
     --workspace) shift; WORKSPACE="${1:-}"; [ -n "$WORKSPACE" ] || { echo "stack-up: --workspace needs a directory" >&2; exit 2; } ;;
     -h|--help) usage; exit 0 ;;
     *) echo "stack-up: unknown option '$1' (try --help)" >&2; exit 2 ;;
@@ -475,6 +484,10 @@ done
 
 if [ "$FROM_MAIN" -eq 1 ]; then
   printf 'stack-up: --from-main builds sibling or main checkouts, NOT the pinned release tags (invariant 29). A developer switch: nothing it builds is a release.\n' >&2
+fi
+if [ "$REPIN_RECORD_KEY" -eq 1 ] && [ "$WITHOUT_KEYRYX" -eq 1 ]; then
+  echo "stack-up: --repin-record-key needs keyryx, and --without-keyryx turns keyryx off" >&2
+  exit 2
 fi
 
 # --------------------------------------------------------------------------
@@ -1508,6 +1521,9 @@ if [ "$WANT_KEYRYX" -eq 1 ] && ! have go; then
   warn "go not found: keyryx is not built, so this run's record is not signed."
   WANT_KEYRYX=0
 fi
+if [ "$REPIN_RECORD_KEY" -eq 1 ] && [ "$WANT_KEYRYX" -eq 0 ]; then
+  die "--repin-record-key needs keyryx running, and this run does not start it (--only money, or keyryx's ports or Go are not available); see the warning above."
+fi
 # keyryx_unavailable <why>: with the policy plane, keyryx is what wardryx signs through, so
 # a keyryx that cannot be fetched or built stops the run. Without it, the record plane
 # goes on and its record is not signed this run, which the closing output says (invariant 30).
@@ -1517,6 +1533,114 @@ keyryx_unavailable() {
   fi
   warn "$1; this run's record is not signed."
   WANT_KEYRYX=0
+}
+# The record seal's pin (invariant 31). trailryx v1.5.0 signs only under the key its
+# TRAILRYX_KEYRYX_KID names, and refuses to start without one, so the pin is taken from custody
+# itself: custody's trailryx-root key set and its state. The launcher never picks a key on its own.
+# At install the set must hold exactly one ES384 key and it must be the active one. A kept pin is
+# kept only while it is still the active key, so a rotation is never followed silently; the
+# operator moves the pin with --repin-record-key. A refusal sets KEYRYX_RECORD_KID_WHY and the
+# record is not signed this run. The key set and the state are never logged: the kid is a public
+# thumbprint, and only the kid is printed.
+KEYRYX_RECORD_KID=""
+KEYRYX_RECORD_KID_WHY=""
+KEYRYX_RECORD_KID_FILE="$KEYRYX_DIR/trailryx.kid"
+record_key_pin() {
+  local keyset_json state_json verdict kid
+  keyset_json="$(curl -fsS --max-time 5 "http://127.0.0.1:$KEYRYX_PORT/v1/jwks/trailryx-root" 2>/dev/null)" \
+    || { KEYRYX_RECORD_KID_WHY="custody did not answer its trailryx-root key set"; return 1; }
+  state_json="$(curl -fsS --max-time 5 "http://127.0.0.1:$KEYRYX_PORT/v1/state" 2>/dev/null)" \
+    || { KEYRYX_RECORD_KID_WHY="custody did not answer its state"; return 1; }
+  verdict="$(KEYSET_JSON="$keyset_json" STATE_JSON="$state_json" python3 - "$KEYRYX_RECORD_KID_FILE" "$REPIN_RECORD_KEY" 2>/dev/null <<'PY'
+import base64, hashlib, json, os, re, sys
+
+pin_path, repin = sys.argv[1], sys.argv[2] == "1"
+
+def refuse(why):
+    print("REFUSE " + why)
+    sys.exit(0)
+
+def unb64(text):
+    return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+
+def thumbprint(key):
+    canon = json.dumps({"crv": "P-384", "kty": "EC", "x": key["x"], "y": key["y"]}, separators=(",", ":"), sort_keys=True)
+    return base64.urlsafe_b64encode(hashlib.sha256(canon.encode()).digest()).rstrip(b"=").decode()
+
+try:
+    keyset = json.loads(os.environ["KEYSET_JSON"])
+    state = json.loads(os.environ["STATE_JSON"])
+except Exception:
+    refuse("custody answered a document that is not JSON")
+
+keys = keyset.get("keys") if isinstance(keyset, dict) else None
+if not isinstance(keys, list):
+    refuse("the trailryx-root key set in custody has no keys array")
+
+es384 = []
+for key in keys:
+    if not isinstance(key, dict) or key.get("kty") != "EC" or key.get("crv") != "P-384":
+        continue
+    try:
+        sized = len(unb64(key["x"])) == 48 and len(unb64(key["y"])) == 48
+    except Exception:
+        sized = False
+    if not sized or key.get("kid") != thumbprint(key):
+        refuse("a P-384 key in the trailryx-root key set in custody has a kid that is not its RFC 7638 thumbprint")
+    es384.append(key["kid"])
+
+entries = state.get("keys", []) if isinstance(state, dict) else []
+active = None
+for entry in entries:
+    if isinstance(entry, dict) and entry.get("name") == "trailryx-root":
+        active = entry.get("active_kid")
+if not active:
+    refuse("custody names no active trailryx-root key in its state")
+
+if not repin and os.path.exists(pin_path):
+    with open(pin_path) as fh:
+        pinned = fh.read().strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{43}", pinned):
+        refuse("the pin on disk is not a 43-character thumbprint: " + pin_path)
+    if pinned != active:
+        refuse("the pinned key is not the active key custody signs with, so the record would be refused; rotate on purpose with --repin-record-key once custody has moved on")
+    if pinned not in es384:
+        refuse("the pinned key is not in custody key set for trailryx-root")
+    print("KEEP " + pinned)
+    sys.exit(0)
+
+if repin:
+    if active not in es384:
+        refuse("the active trailryx-root key is not an ES384 key in the key set in custody")
+    print("PIN " + active)
+    sys.exit(0)
+
+if len(es384) == 0:
+    refuse("the trailryx-root key set in custody holds no ES384 key, and the pin takes exactly one")
+if len(es384) > 1:
+    refuse("the key set holds " + str(len(es384)) + " ES384 keys, and the pin takes exactly one at install")
+if es384[0] != active:
+    refuse("the one ES384 key in the trailryx-root key set in custody is not the active key")
+print("PIN " + active)
+PY
+)" || verdict="REFUSE the pin check could not run"
+  case "$verdict" in
+    "KEEP "*)   kid="${verdict#KEEP }" ;;
+    "PIN "*)    kid="${verdict#PIN }" ;;
+    "REFUSE "*) KEYRYX_RECORD_KID_WHY="${verdict#REFUSE }"; return 1 ;;
+    *)          KEYRYX_RECORD_KID_WHY="the pin check did not answer"; return 1 ;;
+  esac
+  if [ "${verdict%% *}" = "PIN" ]; then
+    if ! ( umask 077; printf '%s\n' "$kid" > "$KEYRYX_RECORD_KID_FILE" ) || ! chmod 600 "$KEYRYX_RECORD_KID_FILE"; then
+      KEYRYX_RECORD_KID_WHY="could not write the pin to $KEYRYX_RECORD_KID_FILE"
+      return 1
+    fi
+    log "record seal: pinned trailryx-root's active key $kid, the kid trailryx v1.5.0 signs under ($KEYRYX_RECORD_KID_FILE)"
+  else
+    log "record seal: kept the pinned kid $kid, trailryx-root's active key"
+  fi
+  KEYRYX_RECORD_KID="$kid"
+  return 0
 }
 # keyryx is built from the pin table (invariant 29): pinned_repo clones the release tag and
 # refuses any checkout that is not the pinned commit. Built here, before the block that
@@ -2190,7 +2314,7 @@ if [ "$WANT_KEYRYX" -eq 1 ]; then
 
   # The policy names two consumers, each by the digest of its bearer key, and the keys
   # each may sign with: wardryx with wardryx-approval, and the record seal with
-  # trailryx-root, an ES384 key (the one trailryx v1.4.0's signer reads). The digests are
+  # trailryx-root, an ES384 key (the one trailryx's signer reads). The digests are
   # public; the keys stay in their files.
   KEYRYX_WARDRYX_DIGEST="$(file_sha "$KEYRYX_WARDRYX_KEY_PATH")"
   [ -n "$KEYRYX_WARDRYX_DIGEST" ] \
@@ -2214,12 +2338,22 @@ JSON
   # wardryx signs grants through custody and fails a grant it cannot sign (503,
   # the hold stays pending), so a custody that does not answer stops a run that has
   # the policy plane. A run without it goes on, and its record is not signed this run.
+  CUSTODY_UP=0
   if wait_health keyryx "$KEYRYX_PORT" "$!"; then
-    KEYRYX_SIGNING=1
+    CUSTODY_UP=1
   elif [ "$WANT_POLICY" -eq 1 ]; then
     die "keyryx custody did not come up; wardryx cannot sign approvals without it, so the stand stops. See $LOGS_DIR/keyryx.log."
   else
     warn "keyryx custody did not come up, so this run's record is NOT signed. See $LOGS_DIR/keyryx.log."
+  fi
+  # The record seal is pinned to custody's active trailryx-root key before anything is signed
+  # under it (invariant 31). A refused pin leaves this run's record unsigned, with the reason.
+  if [ "$CUSTODY_UP" -eq 1 ]; then
+    if record_key_pin; then
+      KEYRYX_SIGNING=1
+    else
+      warn "record seal: $KEYRYX_RECORD_KID_WHY; this run's record is not signed."
+    fi
   fi
 
   # The witness reads the streams, the record and the public key routes of custody, and
@@ -3101,18 +3235,18 @@ fi
 # signs each sealed root under trailryx-root: TRAILRYX_SIGNER=keyryx, custody's URL, the
 # record-seal credential, and the folder the witness writes its attestations to. When it
 # is not, the signer variables are removed, so one exported in the caller's shell cannot
-# sign or queue a root by accident.
-# TODO(trailryx#112): TRAILRYX_KEYRYX_KID is not set. trailryx v1.4.0 does not read it, so
-# the kid of trailryx-root is not pinned here. Set it once a trailryx release reads it.
+# sign or queue a root by accident. trailryx v1.5.0 refuses a keyryx signer without the pin, so
+# the pin (TRAILRYX_KEYRYX_KID, record_key_pin, invariant 31) travels with the signer.
 seal_node() {
   if [ "$KEYRYX_SIGNING" -eq 1 ]; then
     TRAILRYX_SIGNER=keyryx \
     TRAILRYX_KEYRYX_URL="http://127.0.0.1:$KEYRYX_PORT" \
+    TRAILRYX_KEYRYX_KID="$KEYRYX_RECORD_KID" \
     TRAILRYX_KEYRYX_CREDENTIAL_FILE="$KEYRYX_TRAILRYX_KEY_PATH" \
     TRAILRYX_WITNESS_ATTESTATIONS="$KEYRYX_WITNESS_DIR/attestations" \
       "$NODE_BIN" "$@"
   else
-    env -u TRAILRYX_SIGNER -u TRAILRYX_KEYRYX_URL -u TRAILRYX_KEYRYX_CREDENTIAL_FILE -u TRAILRYX_WITNESS_ATTESTATIONS \
+    env -u TRAILRYX_SIGNER -u TRAILRYX_KEYRYX_URL -u TRAILRYX_KEYRYX_KID -u TRAILRYX_KEYRYX_CREDENTIAL_FILE -u TRAILRYX_WITNESS_ATTESTATIONS \
       "$NODE_BIN" "$@"
   fi
 }
@@ -3280,9 +3414,9 @@ if [ "$WANT_RECORDS" -eq 1 ]; then
   if [ "$WITHOUT_KEYRYX" -eq 1 ]; then
     warn "record: UNSIGNED. --without-keyryx is the weaker setting: the record pack is unsigned, and nothing witnesses the record. Run without the flag to sign it through keyryx."
   elif [ "$KEYRYX_SIGNING" -eq 1 ]; then
-    log "         signed through keyryx: custody signs each sealed root under trailryx-root (ES384), and the witness reads the record from its own process"
+    log "         signed through keyryx: custody signs each sealed root under trailryx-root (ES384), pinned in $KEYRYX_RECORD_KID_FILE; the witness reads the record from its own process"
   else
-    warn "record: UNSIGNED this run, because keyryx did not come up (see the warning above and $LOGS_DIR/keyryx.log): the record pack is unsigned."
+    warn "record: UNSIGNED this run, because keyryx did not come up or its record key was refused (see the warning above and $LOGS_DIR/keyryx.log): the record pack is unsigned."
   fi
   log "read it back with a completeness proof:"
   printf '  %s read --data %s --tenant %s --all\n' "$NODE_BIN" "$RECORDS_DIR" "$RECORDS_TENANT"

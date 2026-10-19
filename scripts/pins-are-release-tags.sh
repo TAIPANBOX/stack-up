@@ -78,11 +78,6 @@ while IFS= read -r line; do
     '*') continue ;;
   esac
   labels="$labels $label"
-  if [ "$label" = verdryx ]; then
-    printf '%s\n' "$line" | grep -qE '^[[:space:]]+verdryx\)[[:space:]]*;;[[:space:]]*$' \
-      || problem "pin_of entry for verdryx names a release, and verdryx publishes none (it is built only with --from-main)"
-    continue
-  fi
   if printf '%s\n' "$line" | grep -qE '^[[:space:]]+[a-z-]+\)[[:space:]]+echo "v[0-9]+[.][0-9]+[.][0-9]+ [0-9a-f]{40}" ;;[[:space:]]*$'; then
     entries=$((entries + 1))
   else
@@ -140,4 +135,4 @@ grep -qF -- 'checkouts, NOT the pinned release' up.sh \
 if [ "$problems" -ne 0 ]; then
   exit 1
 fi
-echo "pins-are-release-tags: $entries components pinned to a release tag and a full commit; verdryx publishes no release tag and is built only with --from-main; every clone goes through pinned_repo, which refuses any checkout that is not the pinned commit"
+echo "pins-are-release-tags: $entries components pinned to a release tag and a full commit; every clone goes through pinned_repo, which refuses any checkout that is not the pinned commit"

@@ -46,7 +46,7 @@ Feature: every component the launcher builds is a release tag, at the commit the
     # -> gates-have-teeth.sh "pins-are-release-tags: a git clone is added outside the pinned path"
 
   Scenario: a component without a pin is not built
-    Given verdryx publishes no release tag
+    Given every component the launcher builds has a release
     When the table loses an entry the launcher builds
     Then pins-are-release-tags.sh fails
     # -> gates-have-teeth.sh "pins-are-release-tags: a component is built with no pin"

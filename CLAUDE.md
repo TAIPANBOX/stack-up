@@ -699,7 +699,7 @@ building here and the thing that most often gets skipped.
     `@decided 2026-10-19`, paraphrased: a build is what a release says it is, so a component is checked out at
     a tag and its commit, and a checkout that is not that commit is refused. `@claude 2026-10-19`: the table is
     `pin_of` in up.sh; each line was read from the repository's remote tags (git ls-remote, the peeled commit)
-    on that date. verdryx publishes no release tag, so it is not built unless `--from-main` is given, and
+    on that date. Every component has a release (verdryx's first, v0.1.0, since 2026-10-19), and
     `--from-main` builds sibling or main checkouts and says so at the top of the run.
     *(gate: `scripts/pins-are-release-tags.sh`: each table entry is a release tag and a full 40-hex commit,
     every component the launcher builds has an entry, locate_repo (the sibling lookup) is called only from
@@ -712,7 +712,7 @@ building here and the thing that most often gets skipped.
     warning weakened, and the table renamed away (measured nothing). Measured on this change: pinned_repo
     cloned all 14 pinned tags and each HEAD equalled its table commit; verdryx was refused; a forced
     commit mismatch was refused. Not covered: a live bring-up at the new pins (not run here), and the
-    cross-version fit of wardryx v2.3.0 with keyryx v0.1.1, which only the wardryx compatibility note reads.)*
+    cross-version fit of wardryx v2.4.0 with keyryx v0.1.1, which only the wardryx compatibility note reads.)*
 
 An approved architecture decision is **not finished** until it is two things: a
 numbered invariant in this file, and a gate in a script if it can be checked

@@ -258,13 +258,13 @@ KEYRYX_WARDRYX_KEY_PATH="$KEYRYX_DIR/wardryx.key"
 # holds the format. keyryx publishes v0.1.1 as a container image and no binary, so
 # its commit is built here with go build, and this launcher runs no containers.
 #
-# verdryx publishes no release tag, so it has no line that names one. It is built
-# only with --from-main, which says so.
+# verdryx published its first release, v0.1.0, on 2026-10-19; before that it had no line
+# and was built only with --from-main.
 pin_of() {
   case "$1" in
     keyryx)         echo "v0.1.1 7384897fff61738cfa9dbbe54c24061dbe65251b" ;;
     tokenfuse)      echo "v1.19.0 84eabe61b0d5785d5198192c296ab1c58ab346bb" ;;
-    wardryx)        echo "v2.3.0 f5db8a95964adb9441690d5846631ea892b367be" ;;
+    wardryx)        echo "v2.4.0 811da4a504e0f4a4918a733f86d5b787303e7f86" ;;
     vouchryx)       echo "v0.6.0 d60e300edb8187482847fec30f188b0d561f5519" ;;
     idryx)          echo "v1.3.0 ac69d395fa927d58fab853fdcceeb6d50f3a537d" ;;
     heraldyx)       echo "v0.8.0 c3b080bb48e14fe2c0f8a0a41d9899e28ad13858" ;;
@@ -276,7 +276,7 @@ pin_of() {
     mockryx)        echo "v0.3.0 14c954dcf8dbcca40b2fa28c5cf202372b8480fc" ;;
     agent-stack-go) echo "v2.0.1 e52e7fc98d77996429543d342b9bf9e7899304a0" ;;
     engram)         echo "v3.0.0 b0b72a87bda73b8ec1287ee6d2450dd60290a0b3" ;;
-    verdryx)        ;;
+    verdryx)        echo "v0.1.0 42617d2268500e46b93302a93de7412522668e91" ;;
     *)              ;;
   esac
 }

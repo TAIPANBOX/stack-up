@@ -833,24 +833,41 @@ root signed in one run still verifies in the next. The wardryx bearer key is min
 each run. No key value is printed, logged, or put on a command line; the summary names
 no key.
 
-keyryx is built from the commit that the tag `v0.1.1` names and nothing else. That tag
-publishes a container image, not a binary, and this launcher runs no containers, so
-the clone is refused unless it is that commit. The pin is one line of the pin table
-(`pin_of`) in `up.sh`; moving it is one change.
+keyryx is built from the commit that the tag `v0.1.2` names and nothing else. Its releases
+are container images, not binaries, and this launcher runs no containers, so the clone is
+refused unless it is that commit. The pin is one line of the pin table (`pin_of`) in
+`up.sh`; moving it is one change.
+
+**The record seal's key is pinned.** trailryx v1.5.0 signs a sealed root only under the key
+its `TRAILRYX_KEYRYX_KID` names, and it refuses to start without one. Once custody is up,
+the launcher reads custody's `trailryx-root` key set and its state, and takes the pin from
+custody's active key: at install the set must hold exactly one P-384 key, and it must be the
+active one. The pin is kept in `~/.stack-up/keyryx/trailryx.kid` (private, 0600) and kept on
+every later run while it is still the active key. The kid is the key's RFC 7638 thumbprint,
+which is public. If a refusal happens, the run says why and its record is not signed.
+
+**Rotating the record key, on purpose.** Rotate `trailryx-root` in custody as usual. Custody
+publishes the new key and makes it active after its publish-ahead time. From then on, a
+run without the flag refuses the pin and says so, because a root signed under the new
+key would not match the pin. Run `./up.sh --repin-record-key` once to move the pin to the
+active key. The flag needs keyryx to run in that run; with `--without-keyryx` it is
+refused. A key set that still holds the old key beside the new one is accepted by the
+repin, because the pin takes the active key only.
 
 **Upgrading.** Nothing to migrate. Earlier versions wiped keyryx's directory on every run
 and minted new root keys each time. The first run of this version keeps the root keys
-and the directory the last run wrote, and mints the record's credential. Records sealed
-before this version stay unsigned; they are not re-signed. A run with `--without-keyryx`
-leaves the record unsigned, as before.
+and the directory the last run wrote, mints the record's credential, and pins the active
+`trailryx-root` key. Records sealed before this version stay unsigned; they are not
+re-signed. A run with `--without-keyryx` leaves the record unsigned, as before. The
+trailryx and keyryx pins moved to trailryx v1.5.0 and keyryx v0.1.2 with this change. A
+keyryx v0.1.2 witness writes its attestations as mode 0640 in 0750 directories; this
+launcher reads them as the same operator, so nothing changes for it.
 
 What this does not prove: that custody refuses a consumer it does not know, that the
 witness finds a real rewrite of a stream, and that the processes keep their keys from
 your own user. Those are keyryx's own tests. Custody and the witness run as one OS
 user here, so they are separated by process and directory, not by user ID. Not run here:
-a live custody signing a root. trailryx v1.4.0 reads one ES384 key from the key set, so a
-rotation of `trailryx-root` is not supported yet, and its key id pin (trailryx#112) is
-not released.
+a live custody signing a root, and a live rotation followed by a repin.
 
 ## Options
 
@@ -864,6 +881,7 @@ not released.
 --no-egress        skip scopyx, the web-egress enforcement point
 --with-delegation  also start vouchryx, the delegation-token service, and open the gateway's delegation door against it
 --with-finops      also start costcrew, the FinOps console, wired to this launcher's bus
+--repin-record-key move the record seal's pin to custody's active trailryx-root key, after a rotation (needs keyryx); see "Keyryx"
 --without-keyryx   turn keyryx off: the sealed record is then UNSIGNED (the weaker setting); see "Keyryx"
 --force-install    replace binaries another tool installed
 --workspace <dir>  look here for sibling checkouts (with --from-main only)

@@ -32,8 +32,8 @@
 # WHAT IT DOES NOT HOLD
 #
 # That custody signs under trailryx-root for a real trailryx seal, that the witness
-# attests a real root, and that the pinned trailryx reads TRAILRYX_KEYRYX_KID (trailryx
-# #112, not released: a named TODO in up.sh, not a check here). Those need built binaries.
+# attests a real root. The pin the signer needs (TRAILRYX_KEYRYX_KID) is checked by
+# scripts/record-key-is-pinned.sh, not here. Those need built binaries.
 #
 # It refuses to report OK when it measured nothing: no up.sh, no routines.sh, no seal_node
 # or trailryx_node function, and no trailryx-node call to judge, is "measured nothing".

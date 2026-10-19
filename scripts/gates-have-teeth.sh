@@ -1524,7 +1524,7 @@ run_case "keyryx-is-per-run: the witness alerts go onto the shared bus" fail \
 
 run_case "keyryx-is-per-run: the pin is a branch name, not a commit" fail \
 	'./scripts/keyryx-is-per-run.sh' \
-	"$(py 'edit("up.sh", "KEYRYX_COMMIT=\"7384897fff61738cfa9dbbe54c24061dbe65251b\"", "KEYRYX_COMMIT=\"main\"")')" \
+	"$(py 'edit("up.sh", "echo \"v0.1.1 7384897fff61738cfa9dbbe54c24061dbe65251b\" ;;", "echo \"main\" ;;")')" \
 	"keyryx is not pinned to a commit"
 
 run_case "keyryx-is-per-run: no custody start to judge" fail \
@@ -1672,6 +1672,108 @@ run_case "demo-runs-after-its-planes: no demo call at all" fail \
 run_case "demo-runs-after-its-planes: a comment that names the call is not a call" pass \
 	'./scripts/demo-runs-after-its-planes.sh' \
 	"$(py 'edit("up.sh", "  # demo_traffic runs below, once the policy plane answers: see after wardryx.\n", "  # demo_traffic\n")')"
+
+# --- invariant 28: the hold on a missing signal, seeded under --typed-risk-signal only ---
+
+run_case "risk-hold-is-seeded: the when_absent line is dropped" fail \
+	'./scripts/risk-hold-is-seeded.sh' \
+	"$(py 'edit("up.sh", "    when_absent: hold\nYAML", "YAML")')" \
+	"when_absent: hold"
+
+run_case "risk-hold-is-seeded: when_absent becomes allow" fail \
+	'./scripts/risk-hold-is-seeded.sh' \
+	"$(py 'edit("up.sh", "    when_absent: hold\nYAML", "    when_absent: allow\nYAML")')" \
+	"when_absent: hold"
+
+run_case "risk-hold-is-seeded: the rule is written without the flag" fail \
+	'./scripts/risk-hold-is-seeded.sh' \
+	"$(py 'edit("up.sh", "  if [ \"$TYPED_RISK_SIGNAL\" -eq 1 ]; then\n    bin_reads_setting \"$WARDRYX_BIN\" when_absent", "  if true; then\n    bin_reads_setting \"$WARDRYX_BIN\" when_absent")')" \
+	"written outside the --typed-risk-signal guard"
+
+run_case "risk-hold-is-seeded: wardryx is not checked for when_absent" fail \
+	'./scripts/risk-hold-is-seeded.sh' \
+	"$(py 'edit("up.sh", "bin_reads_setting \"$WARDRYX_BIN\" when_absent", ": \"$WARDRYX_BIN\" when_absent")')" \
+	"does not check that the wardryx binary reads when_absent"
+
+run_case "risk-hold-is-seeded: single-use is switched off" fail \
+	'./scripts/risk-hold-is-seeded.sh' \
+	"$(py 'edit("up.sh", "  WARDRYX_APPROVAL_SIGNER=keyryx \\\n", "  WARDRYX_APPROVAL_SINGLE_USE=false \\\n  WARDRYX_APPROVAL_SIGNER=keyryx \\\n")')" \
+	"switches WARDRYX_APPROVAL_SINGLE_USE off"
+
+run_case "risk-hold-is-seeded: the threshold is dropped" fail \
+	'./scripts/risk-hold-is-seeded.sh' \
+	"$(py 'edit("up.sh", "    min_probability: 0.8\n", "")')" \
+	"min_probability: 0.8"
+
+run_case "risk-hold-is-seeded: the rule is narrowed to one trust domain" fail \
+	'./scripts/risk-hold-is-seeded.sh' \
+	"$(py 'edit("up.sh", "  target: \"agent://*\"", "  target: \"agent://demo.local/*\"")')" \
+	"agent://*"
+
+run_case "risk-hold-is-seeded: the rule is renamed away" fail \
+	'./scripts/risk-hold-is-seeded.sh' \
+	"$(py 'edit("up.sh", "- name: stack-up-typed-risk-hold", "- name: stack-up-typed-risk-holx")')" \
+	"measured nothing"
+
+run_case "risk-hold-is-seeded: a comment that names when_absent: allow is not a fault" pass \
+	'./scripts/risk-hold-is-seeded.sh' \
+	"$(py 'edit("up.sh", "# Wardryx (optional): policy decision point with the seeded demo policy.\n", "# Wardryx (optional): policy decision point with the seeded demo policy.\n# when_absent: allow is what a rule without the key does, and nothing here sets it.\n")')"
+
+# --- invariant 29: every component is built from a release tag and the commit it names ---
+
+run_case "pins-are-release-tags: a component is pinned to a branch" fail \
+	'./scripts/pins-are-release-tags.sh' \
+	"$(py 'edit("up.sh", "echo \"v1.19.0 84eabe61b0d5785d5198192c296ab1c58ab346bb\"", "echo \"main 84eabe61b0d5785d5198192c296ab1c58ab346bb\"")')" \
+	"is not a release tag and a full commit"
+
+run_case "pins-are-release-tags: a pin names a short commit" fail \
+	'./scripts/pins-are-release-tags.sh' \
+	"$(py 'edit("up.sh", "84eabe61b0d5785d5198192c296ab1c58ab346bb\" ;;", "84eabe6\" ;;")')" \
+	"is not a release tag and a full commit"
+
+run_case "pins-are-release-tags: a build reaches the sibling checkout" fail \
+	'./scripts/pins-are-release-tags.sh' \
+	"$(py 'edit("up.sh", "TF_REPO=\"$(pinned_repo tokenfuse)\"", "TF_REPO=\"$(locate_repo tokenfuse)\"")')" \
+	"locate_repo is called outside pinned_repo"
+
+run_case "pins-are-release-tags: the clone drops its --branch tag" fail \
+	'./scripts/pins-are-release-tags.sh' \
+	"$(py 'edit("up.sh", "--branch \"$tag\" \"$GH/$name.git\"", "\"$GH/$name.git\"")')" \
+	"does not clone the release tag"
+
+run_case "pins-are-release-tags: a checkout that is not the pinned commit is accepted" fail \
+	'./scripts/pins-are-release-tags.sh' \
+	"$(py 'edit("up.sh", "is not $tag ($commit); refusing to build it.\"; return 1; }", "is not $tag ($commit); building it anyway.\"; }")')" \
+	"does not refuse a checkout that is not the pinned commit"
+
+run_case "pins-are-release-tags: a git clone is added outside the pinned path" fail \
+	'./scripts/pins-are-release-tags.sh' \
+	"$(py 'edit("up.sh", "GH=\"https://github.com/TAIPANBOX\"\n", "GH=\"https://github.com/TAIPANBOX\"\ngit clone --quiet \"$GH/wardryx.git\" \"$STACK_UP_HOME/unpinned\" 2>/dev/null || true\n")')" \
+	"git clone runs outside pinned_repo"
+
+run_case "pins-are-release-tags: a component is built with no pin" fail \
+	'./scripts/pins-are-release-tags.sh' \
+	"$(py 'edit("up.sh", "\n    qryx)", "\n    qryx-x)")')" \
+	"has no entry for qryx"
+
+run_case "pins-are-release-tags: --from-main is not a flag any more" fail \
+	'./scripts/pins-are-release-tags.sh' \
+	"$(py 'edit("up.sh", "--from-main) FROM_MAIN=1 ;;", "--from-mian) FROM_MAIN=1 ;;")')" \
+	"--from-main is not a flag"
+
+run_case "pins-are-release-tags: --from-main no longer says it is not a release" fail \
+	'./scripts/pins-are-release-tags.sh' \
+	"$(py 'edit("up.sh", "checkouts, NOT the pinned release tags", "checkouts, the pinned release tags")')" \
+	"does not say it is not the pinned release"
+
+run_case "pins-are-release-tags: the pin table is renamed away" fail \
+	'./scripts/pins-are-release-tags.sh' \
+	"$(py 'edit("up.sh", "pin_of() {", "pin_off() {")')" \
+	"measured nothing"
+
+run_case "pins-are-release-tags: a comment that names locate_repo is not a fault" pass \
+	'./scripts/pins-are-release-tags.sh' \
+	"$(py 'edit("up.sh", "GH=\"https://github.com/TAIPANBOX\"\n", "GH=\"https://github.com/TAIPANBOX\"\n# locate_repo reads a sibling checkout; only --from-main reaches it.\n")')"
 
 echo
 if [ -n "$(git status --porcelain)" ]; then

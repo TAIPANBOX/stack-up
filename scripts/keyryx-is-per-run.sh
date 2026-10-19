@@ -16,8 +16,8 @@
 #
 # WHAT IT HOLDS
 #
-# 1. keyryx is pinned to a tag and to a 40-hex commit, and the launcher builds
-#    that commit.
+# 1. keyryx is pinned to a tag and to a 40-hex commit in the pin table, and the
+#    launcher builds that commit (pinned_repo refuses any other).
 # 2. The custody start and the witness start take their data directory and their
 #    root key file from run variables, and the two data directories differ.
 # 3. Each root key is minted with rand_hex above the first custody start, and
@@ -75,8 +75,9 @@ witness_lines="$(code | grep -F '"$KEYRYX_BIN" witness' || true)"
 wardryx_lines="$(code | grep -F '"$WARDRYX_BIN" serve' || true)"
 
 # 1. The pin.
-grep -qE '^KEYRYX_COMMIT="[0-9a-f]{40}"$' up.sh || problem "keyryx is not pinned to a commit (KEYRYX_COMMIT must be a full 40-hex SHA)"
-grep -qE '^KEYRYX_TAG="v[0-9]+[.][0-9]+[.][0-9]+"$' up.sh || problem "keyryx is not pinned to a tag (KEYRYX_TAG)"
+# The pin lives in the pin table (pin_of, invariant 29): keyryx's line names a tag and a 40-hex commit.
+grep -qE '^[[:space:]]+keyryx\)[[:space:]]+echo "v[0-9]+[.][0-9]+[.][0-9]+ [0-9a-f]{40}" ;;' up.sh || problem "keyryx is not pinned to a commit (its pin_of entry must name a tag and a full 40-hex SHA)"
+grep -qE '^[[:space:]]+keyryx\)[[:space:]]+echo "v[0-9]+[.][0-9]+[.][0-9]+ ' up.sh || problem "keyryx is not pinned to a tag (its pin_of entry)"
 
 # 2. The subjects. Zero of any of them is measured nothing.
 [ -n "$custody_lines" ] || problem "no keyryx custody start in up.sh: measured nothing"

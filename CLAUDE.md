@@ -51,6 +51,8 @@ bash -n up.sh && bash -n down.sh && bash -n routines.sh
 ./scripts/demo-issuer-is-unbound.sh
 ./scripts/bus-is-operator-owned.sh
 ./scripts/demo-runs-after-its-planes.sh
+./scripts/pins-are-release-tags.sh
+./scripts/risk-hold-is-seeded.sh
 ./scripts/gates-have-teeth.sh   # invariant 6; needs a clean tree
 ```
 
@@ -341,7 +343,9 @@ building here and the thing that most often gets skipped.
     checkout lacks the `action.risk_class` template. The LLM gateway keeps
     talking to wardryx directly: the model path has no pending call to classify
     and a hosted backend's latency would push decisions past the gateway's own
-    timeout. No `hold_if_signal` policy is seeded; README.md has an example.
+    timeout. No `hold_if_signal` policy is seeded by a plain run.
+    `@claude 2026-10-19`: with the flag, invariant 28 seeds one hold on a missing signal;
+    README.md shows how to write your own.
     `--typed-plan` prints what leaves the machine for the chosen backend: under
     jev, the tool name, arguments and target of every brokered call go to
     TypeSafe AI, one ask per call. `@claude 2026-10-04`: the broker's policy gate
@@ -576,7 +580,7 @@ building here and the thing that most often gets skipped.
     and an independent witness of the record, both off every request path, with wardryx's approvals
     signed by custody and not by a shared secret. `@claude 2026-10-18`: the shape here is my reading of
     that decision for a launcher, not a stated decision. `up.sh` builds keyryx from the commit that
-    `KEYRYX_TAG` names, refused unless the clone is `KEYRYX_COMMIT`, because keyryx v0.1.1 publishes a
+    tag and commit in the pin table names, refused unless the clone is that commit (invariant 29), because keyryx v0.1.1 publishes a
     container image and no binary and this launcher runs no containers. It mints three values per run
     above the first custody start, each refused when empty: the custody root key and the witness root
     key (`rand_hex 32`, each in its own 0600 file under `$STACK_UP_HOME/keyryx`) and the bearer key
@@ -673,6 +677,43 @@ building here and the thing that most often gets skipped.
     the two 200s and four 402s themselves, which need built binaries and are the bring-up
     above, not a script here.)*
 
+28. **With `--typed-risk-signal`, a brokered tool call that the signal never reaches is held, not allowed.**
+    `@decided 2026-10-19`, paraphrased: the risk signal can add a hold and never a deny, and a hold that a
+    silent classifier never gave is a hold too, so a call that arrives with no signal waits for a person.
+    `@claude 2026-10-19`: the seeded rule and its refusals are my reading. The launcher seeds
+    `stack-up-typed-risk-hold` in the wardryx policy file only under the flag: `action.risk_class` in
+    destructive, external_send or financial at 0.8 or more, `when_absent: hold`, and `target: "agent://*"`,
+    because a brokered call carries the broker's caller id, which is not one trust domain. It refuses,
+    before wardryx starts, a wardryx binary that does not read `when_absent` (wardryx v1.4.0 and later).
+    Single-use stays on: nothing sets `WARDRYX_APPROVAL_SINGLE_USE`, so one approval lifts one held call.
+    *(gate: `scripts/risk-hold-is-seeded.sh`: the rule's lines, the guard that writes it only under the flag,
+    the `when_absent` check and its refusal, no `when_absent` set to allow or deny, and no single-use switch
+    off; `features/the-typed-risk-signal-holds-when-absent.feature`, 8 scenarios, every one bound to a case in
+    `gates-have-teeth.sh`. Mutants, each caught by a named case: the `when_absent` line dropped, `when_absent`
+    set to allow, the rule written without the flag, the wardryx check removed, single-use switched off, the
+    threshold removed, the target narrowed to one trust domain, and the rule renamed away (measured nothing).
+    Not covered: a running wardryx holding a padded call, which needs built binaries and the typryx proxy in
+    front of it; wardryx v1.4.0's own tests cover the hold, and the launcher's part was not run live.)*
+
+29. **Every component the launcher builds is a release tag, at the commit that tag names, from one table.**
+    `@decided 2026-10-19`, paraphrased: a build is what a release says it is, so a component is checked out at
+    a tag and its commit, and a checkout that is not that commit is refused. `@claude 2026-10-19`: the table is
+    `pin_of` in up.sh; each line was read from the repository's remote tags (git ls-remote, the peeled commit)
+    on that date. verdryx publishes no release tag, so it is not built unless `--from-main` is given, and
+    `--from-main` builds sibling or main checkouts and says so at the top of the run.
+    *(gate: `scripts/pins-are-release-tags.sh`: each table entry is a release tag and a full 40-hex commit,
+    every component the launcher builds has an entry, locate_repo (the sibling lookup) is called only from
+    pinned_repo, git clone runs only in pinned_repo and locate_repo, pinned_repo clones with `--branch` and
+    refuses a HEAD that is not the pinned commit, and --from-main is a flag that says it is not a release;
+    `features/every-component-is-pinned-to-a-release.feature`, 11 scenarios bound to cases in
+    `gates-have-teeth.sh`. Mutants, each caught by a named case: a branch name in place of a tag, a short
+    commit, a locate_repo call in the default path, the --branch dropped from the clone, the refusal made
+    to accept, a clone added outside the pinned path, a component with no entry, --from-main removed, its
+    warning weakened, and the table renamed away (measured nothing). Measured on this change: pinned_repo
+    cloned all 14 pinned tags and each HEAD equalled its table commit; verdryx was refused; a forced
+    commit mismatch was refused. Not covered: a live bring-up at the new pins (not run here), and the
+    cross-version fit of wardryx v2.3.0 with keyryx v0.1.1, which only the wardryx compatibility note reads.)*
+
 An approved architecture decision is **not finished** until it is two things: a
 numbered invariant in this file, and a gate in a script if it can be checked
 structurally. Until then it is a document, and documents do not stop code.
@@ -683,7 +724,7 @@ structurally. Until then it is a document, and documents do not stop code.
   bodies. Use a comma, a colon, parentheses, or a short hyphen.
 - A scenario in `features/` is bound by a `# -> gates-have-teeth.sh "<case>"`
   line under it, and `scripts/features-are-bound.sh` holds the binding both ways.
-- This launcher pins no release tag except keyryx's (`KEYRYX_TAG`, invariant 23). Everything else builds from `main`, so a release's new setting is
+- Every component is built from its pinned release tag, from the pin table (invariant 29). `--from-main` is the developer switch to sibling or main checkouts, and it is loud. A release's new setting is
   held by checking at launch that the binary names it, never by a version number.
 - Nothing paid or metered gets enabled without telling the user first and
   getting agreement.

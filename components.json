@@ -156,6 +156,10 @@
         "keyryx_witness_alerts_stay_off_the_bus": {
           "value": "the witness writes $STACK_UP_HOME/keyryx/witness/alerts.ndjson, not $STACK_UP_HOME/events/keyryx.ndjson",
           "why": "@claude 2026-10-18: heraldyx does not render keyryx's event types until its H1 change is released, and the bus-file contract (CLAUDE.md invariant 14) would need a new source entry in bus-files-match-sources.sh for a file nothing reads yet. Revisit when heraldyx renders the keyryx source."
+        },
+        "record_is_signed_by_keyryx_by_default": {
+          "value": "keyryx starts with the policy plane or the record plane and never under --without-keyryx, which is the one switch; trailryx-root (ES384) signs each sealed root for the record-seal consumer alone; the record-seal credential and the root keys are minted once and kept; every trailryx-node call goes through seal_node (up.sh) or trailryx_node (routines.sh); the witness reads the records directory under tenant acme; the opt-out and a custody that does not come up on a run without the policy plane say the record pack is unsigned",
+          "why": "@decided 2026-10-19 (paraphrased): keyryx is part of every install, and the record is signed through it by default. @claude 2026-10-19: the mechanism is my reading of trailryx v1.4.0's signer (TRAILRYX_SIGNER=keyryx, TRAILRYX_KEYRYX_URL, TRAILRYX_KEYRYX_CREDENTIAL_FILE, TRAILRYX_WITNESS_ATTESTATIONS) and keyryx v0.1.1's policy and witness configuration, read from both repositories at those tags, not run. Named, not done: TRAILRYX_KEYRYX_KID (trailryx#112) and rotation of trailryx-root."
         }
       }
     }

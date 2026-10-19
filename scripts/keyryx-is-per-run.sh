@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2016 # the patterns here are literal text from up.sh, not expansions
-# keyryx in this launcher: the custody role and the witness run per run, from
-# separate data directories and separate root keys, and wardryx signs its
-# approvals through custody. Invariant 23.
+# keyryx in this launcher: the custody role and the witness run in every install, from
+# separate data directories and separate root keys, which are kept across runs (invariant
+# 30), and wardryx signs its approvals through custody. Invariant 23.
 #
 # WHY
 #
@@ -148,4 +148,4 @@ done
 if [ "$problems" -ne 0 ]; then
   exit 1
 fi
-echo "keyryx-is-per-run: custody and witness start from per-run keys and separate data directories, the pin is a commit, and wardryx signs its approvals through keyryx ($(printf '%s\n' "$custody_lines" | grep -c .) custody, $(printf '%s\n' "$witness_lines" | grep -c .) witness, $(printf '%s\n' "$wardryx_lines" | grep -c .) wardryx start)"
+echo "keyryx-is-per-run: custody and witness start from separate data directories and separate root keys, the pin is a commit, and wardryx signs its approvals through keyryx ($(printf '%s\n' "$custody_lines" | grep -c .) custody, $(printf '%s\n' "$witness_lines" | grep -c .) witness, $(printf '%s\n' "$wardryx_lines" | grep -c .) wardryx start)"

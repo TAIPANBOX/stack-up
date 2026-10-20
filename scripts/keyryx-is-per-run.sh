@@ -28,7 +28,8 @@
 #    wardryx binary names WARDRYX_APPROVAL_SIGNER before it starts it.
 # 6. No key value reaches a log, warn, die or echo line, a printf that is not a
 #    file write, or the command line of a keyryx or wardryx process.
-# 7. The witness writes its alerts beside its own data, not into the shared bus.
+# 7. The witness writes its alerts to a file of their own, not into the shared bus and not
+#    into its data directory (invariant 32, scripts/keyryx-alerts-reach-readers.sh).
 #
 # WHAT IT DOES NOT HOLD
 #
@@ -93,7 +94,7 @@ need "keyryx custody start" "$custody_lines" \
 need "keyryx witness start" "$witness_lines" \
   'KEYRYX_WITNESS_DATA="$KEYRYX_WITNESS_DIR"' \
   'KEYRYX_WITNESS_ROOT_KEY_FILE="$KEYRYX_WITNESS_ROOT_KEY_PATH"' \
-  'KEYRYX_WITNESS_ALERTS="$KEYRYX_WITNESS_DIR/'
+  'KEYRYX_WITNESS_ALERTS="$KEYRYX_ALERTS_FILE"'
 
 # The two data directories are different values, not one directory named twice.
 custody_dir="$(grep -E '^KEYRYX_CUSTODY_DIR=' up.sh | head -1 | cut -d= -f2-)"

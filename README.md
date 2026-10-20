@@ -40,7 +40,7 @@ Everything binds to `127.0.0.1` only.
 | dashboard | 3000 | The money-plane dashboard, a static page served locally. This is the thing you actually look at. |
 | wardryx | 8090 | Policy decision point, seeded with a tiny demo policy scoped to fire-drill identities only. Its approvals are signed by keyryx (below). |
 | keyryx (custody) | 4340 | Holds the key wardryx signs approvals with, and publishes the keys a verifier needs. Started with the policy plane or the record plane; see "Keyryx" below. |
-| keyryx (witness) | 4341 | Reads the event streams from its own process and records what it saw. It writes nothing to the streams. |
+| keyryx (witness) | 4341 | Reads the event streams from its own process and records what it saw. It writes nothing to the streams; its findings go to their own file, which heraldyx reads. |
 | idryx | 8081 | Identity/access graph, built from the event stream. Its own default `:8080` collides with cloud, so stack-up runs it on `:8081`. |
 | heraldyx | none | The notifier. Reads the same event stream and decides which events are worth writing to a human about. Here it is pinned to file mode: it writes what it WOULD mail to `~/.stack-up/mail.txt` and opens no socket. `--no-notify` skips it. |
 | scopyx | 4300 | Governed web egress. Agents fetch **through** it, and wardryx decides every destination before anything leaves. `./up.sh` makes one call through it, to the cloud metadata address, which is refused on its address before a packet leaves the machine: read the refusal in `~/.stack-up/events/scopyx.ndjson` and the alert it raised in `~/.stack-up/mail.txt`. `--no-egress` skips it. |
@@ -814,8 +814,15 @@ approval when a person grants one: wardryx v2.2.0 asks custody for that signatur
 an approval can be checked against a published key rather than against a secret wardryx
 holds. It also holds `trailryx-root`, the key that signs each sealed root of the record.
 The **witness** reads the event streams and the record from its own process, keeps its
-own log, and writes nothing to the streams. Its findings go to its own data directory for
-now, not to the shared bus, because heraldyx does not render keyryx's events yet.
+own log, and writes nothing to the streams. Its findings go to a file of their own,
+`~/.stack-up/keyryx/alerts/keyryx.ndjson`, which is neither the shared bus nor the
+witness's data directory. heraldyx (v0.8.0, which renders keyryx's findings) reads that
+file beside the bus and writes what it would mail to `~/.stack-up/mail.txt`. This launcher
+starts no console; the closing summary prints the `GENARYX_EVENTS_EXTRA` line a Genaryx
+console you start yourself needs to show the findings as incidents. On any run after the
+first, the witness reports `tokenfuse.ndjson` as cut short or rewritten, because `up.sh`
+empties that file each time it starts and the witness remembers what it saw; that finding
+is the launcher's own doing, not a tamper.
 
 keyryx starts whenever a signature has work: with the policy plane (approvals) or with
 the record plane (sealed records). `--only money` has neither, so it starts none.

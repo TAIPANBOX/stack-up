@@ -52,7 +52,7 @@ Feature: keyryx runs in every install, with custody and the witness kept apart, 
     # -> gates-have-teeth.sh "keyryx-is-per-run: wardryx keeps an approval secret"
     # -> gates-have-teeth.sh "keyryx-is-per-run: the wardryx binary is not checked for the signer"
 
-  Scenario: the witness keeps its alerts beside its own data, off the shared bus
+  Scenario: the witness keeps its alerts in a file of their own, off the shared bus
     Given the witness start in up.sh
     When its alert file is named inside the events directory
     Then keyryx-is-per-run.sh fails

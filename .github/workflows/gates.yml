@@ -54,6 +54,9 @@ jobs:
       - name: keyryx's custody and witness run from separate keys, and wardryx signs its approvals through custody
         run: ./scripts/keyryx-is-per-run.sh
 
+      - name: the witness's findings reach heraldyx and a console, and the witness never writes the bus (invariant 32)
+        run: ./scripts/keyryx-alerts-reach-readers.sh
+
       - name: the sealed record is signed through keyryx by default, and the opt-out says the record is unsigned
         run: ./scripts/record-is-signed-by-default.sh
 

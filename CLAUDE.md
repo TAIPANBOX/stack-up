@@ -37,6 +37,7 @@ bash -n up.sh && bash -n down.sh && bash -n routines.sh
 ./scripts/admin-keys-are-per-run.sh
 ./scripts/postures-are-held.sh
 ./scripts/keyryx-is-per-run.sh
+./scripts/keyryx-alerts-reach-readers.sh
 ./scripts/record-is-signed-by-default.sh
 ./scripts/record-key-is-pinned.sh
 ./scripts/wardryx-fails-closed.sh
@@ -388,7 +389,10 @@ building here and the thing that most often gets skipped.
     `costcrew`, `typryx`, `verdryx` and `agent-conform` under `$EVENTS_DIR`, and
     passes idryx `--load tokenfuse:tokenfuse.ndjson` in two places; the table is in
     the pull request that checked it. `@claude 2026-10-04`: the gate's allow table
-    is a copy of the readers' own, and nothing holds the three equal.
+    is a copy of the readers' own, and nothing holds the three equal. `@claude
+    2026-10-20`: one stream heraldyx reads is off the bus, the keyryx witness's
+    findings (invariant 32); `keyryx.ndjson` carries `keyryx`, a row heraldyx has from
+    v0.8.0, so the gate requires that pin or later in the pin table.
     *(gate: `scripts/bus-files-match-sources.sh`, 9 stream files and 2 `--load`
     pairs, teeth in `gates-have-teeth.sh`. Not covered: what each producer writes
     INTO its file; read from each producer's source constant, not measured.)*
@@ -594,8 +598,8 @@ building here and the thing that most often gets skipped.
     witness each keep their own data directory, and the two directories differ. wardryx starts with
     `WARDRYX_APPROVAL_SIGNER=keyryx`, its custody URL and its key file, and without
     `WARDRYX_APPROVAL_SECRET`; the launcher refuses to start a wardryx binary that does not name the
-    signer. The witness writes its alerts to its own data directory, not to the shared bus, because
-    heraldyx does not render keyryx's events yet. The witness is optional and says so when it does not
+    signer. The witness writes its alerts to a file of their own, not to the shared bus and not to its
+    data directory, which heraldyx reads (invariant 32). The witness is optional and says so when it does not
     come up; custody is not, because wardryx cannot sign without it.
     *(gate: `scripts/keyryx-is-per-run.sh`: the keyryx pin is a 40-hex commit and a tag; custody and the
     witness take their data directory and root key file from run variables, and the two data
@@ -772,6 +776,32 @@ building here and the thing that most often gets skipped.
     trailryx v1.5.0 verifies a live signature against (a running custody and trailryx, not run here); that a
     rotation of trailryx-root followed by `--repin-record-key` is accepted by a live seal; the thumbprint agreement
     with trailryx's own `thumbprint_p384` (read in its source, not run, the canonical form is the same).)*
+
+32. **The keyryx witness's findings reach heraldyx and a console, which read them, and the witness never writes the bus it witnesses.**
+    `@decided 2026-10-20` (paraphrased): readers are given read-only access to the witness's own findings
+    file, and the witness is never given write access to the bus it witnesses, because a witness that
+    could write the record could add to what it vouches for. `@claude 2026-10-20`: the witness wrote
+    `alerts.ndjson` in its own data directory, beside its keys and its log, a temporary choice while
+    heraldyx could not render the keyryx source (components.json, superseded), so nothing read it.
+    heraldyx v0.8.0, the pin here, renders the seven `witness_*` types (agent-passport SPEC 6.2, source
+    `keyryx`). Now `KEYRYX_ALERTS_FILE` is `$STACK_UP_HOME/keyryx/alerts/keyryx.ndjson`, a directory of
+    its own made 0700 before the witness starts; the witness writes it as `KEYRYX_WITNESS_ALERTS` and
+    still reads the bus as `KEYRYX_WITNESS_EVENTS`; heraldyx reads `HERALDYX_EVENTS="$EVENTS_DIR,$KEYRYX_ALERTS_FILE"`
+    and skips the file while it is absent; the closing summary prints `GENARYX_EVENTS_EXTRA` with the
+    file for a console started by hand, since this launcher starts none; nothing else in the launcher
+    names the file. heraldyx writes what it would mail at `medium` here (invariant 14's reader setting,
+    `HERALDYX_MIN_SEVERITY=medium`), so every finding reaches `mail.txt`. On a run after the first, the
+    witness reports `tokenfuse.ndjson` cut short or rewritten, because `up.sh` empties it at start
+    (`: > "$EVENTS_FILE"`) and the witness rebuilds what it saw from its log; that is the launcher's own
+    doing, named in the README, and not changed here.
+    *(gate: `scripts/keyryx-alerts-reach-readers.sh`: the directory and file, the order against the
+    witness start, the witness start, heraldyx's entries, the summary line, and no other line of up.sh,
+    routines.sh or down.sh naming the file; it refuses OK with no witness or no heraldyx start;
+    `scripts/bus-files-match-sources.sh` for the stem and the heraldyx pin; `scripts/keyryx-is-per-run.sh`
+    item 7; scenarios in `features/the-witness-findings-reach-their-readers.feature`, each bound to a case
+    in `gates-have-teeth.sh`. Not covered: a running witness writing a finding and heraldyx writing it to
+    `mail.txt`, which needs built binaries and was not run; read-only by uid, which this one-user
+    launcher cannot give (invariant 23); and a console reading the file, since none is started here.)*
 
 An approved architecture decision is **not finished** until it is two things: a
 numbered invariant in this file, and a gate in a script if it can be checked

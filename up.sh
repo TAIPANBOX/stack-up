@@ -15,7 +15,9 @@
 #   dashboard           :3000   the money-plane dashboard (static, in a browser)
 #   wardryx             :8090   policy decision point (seeded demo policy)
 #   keyryx              :4340   key custody: wardryx's approval key (with wardryx)
-#   keyryx witness      :4341   reads the event streams, writes none of them
+#   keyryx witness      :4341   reads the event streams, writes none of them; its
+#                       findings go to ~/.stack-up/keyryx/alerts/keyryx.ndjson,
+#                       which heraldyx reads (and a console can, read only)
 #   idryx               :8081   identity/access graph (its own :8080 collides)
 #   heraldyx            no port the notifier, reading the shared event log and
 #                       writing what it WOULD mail to ~/.stack-up/mail.txt
@@ -252,6 +254,12 @@ MARKERS_DIR="$STACK_UP_HOME/markers"
 KEYRYX_DIR="$STACK_UP_HOME/keyryx"
 KEYRYX_CUSTODY_DIR="$KEYRYX_DIR/custody"
 KEYRYX_WITNESS_DIR="$KEYRYX_DIR/witness"
+# The witness's findings (invariant 32): a directory of their own, neither the bus the
+# witness reads nor its data directory, which holds its keys and its log. heraldyx reads
+# the file; nothing else here writes it. Named keyryx.ndjson because that stem is the one
+# heraldyx v0.8.0 reads as source keyryx (invariant 14).
+KEYRYX_ALERTS_DIR="$KEYRYX_DIR/alerts"
+KEYRYX_ALERTS_FILE="$KEYRYX_ALERTS_DIR/keyryx.ndjson"
 KEYRYX_CUSTODY_ROOT_KEY_PATH="$KEYRYX_DIR/custody-root.key"
 KEYRYX_WITNESS_ROOT_KEY_PATH="$KEYRYX_DIR/witness-root.key"
 KEYRYX_POLICY_PATH="$KEYRYX_DIR/policy.json"
@@ -2254,9 +2262,9 @@ if [ "$WANT_KEYRYX" -eq 1 ]; then
   # Kept across runs (invariant 30): the custody and witness directories are not wiped,
   # because the keys in them, and the root keys that wrap them, must outlive this run for
   # a sealed root to verify in the next one. A directory an earlier run made is reused.
-  mkdir -p "$KEYRYX_CUSTODY_DIR" "$KEYRYX_WITNESS_DIR" \
+  mkdir -p "$KEYRYX_CUSTODY_DIR" "$KEYRYX_WITNESS_DIR" "$KEYRYX_ALERTS_DIR" \
     || die "could not create the keyryx state under $KEYRYX_DIR."
-  chmod 700 "$KEYRYX_CUSTODY_DIR" "$KEYRYX_WITNESS_DIR" \
+  chmod 700 "$KEYRYX_CUSTODY_DIR" "$KEYRYX_WITNESS_DIR" "$KEYRYX_ALERTS_DIR" \
     || die "could not make the keyryx data directories 0700."
 
   # The two root keys and the record-seal credential are minted ONCE: an existing
@@ -2357,8 +2365,9 @@ JSON
   fi
 
   # The witness reads the streams, the record and the public key routes of custody, and
-  # its alerts stay in its own data directory: the shared bus is not written from here.
-  # It reads the seal's records directory under the tenant the seal writes (invariant 30).
+  # writes none of them: its findings go to their own file, off the bus it witnesses,
+  # which heraldyx reads (invariant 32). It reads the seal's records directory under the
+  # tenant the seal writes (invariant 30).
   log "starting the keyryx witness on :$KEYRYX_WITNESS_PORT (reads the event streams and the record, writes none of them)"
   KEYRYX_WITNESS_ADDR="127.0.0.1:$KEYRYX_WITNESS_PORT" \
   KEYRYX_WITNESS_DATA="$KEYRYX_WITNESS_DIR" \
@@ -2366,7 +2375,7 @@ JSON
   KEYRYX_WITNESS_EVENTS="$EVENTS_DIR" \
   KEYRYX_WITNESS_RECORDS="$RECORDS_TENANT|$RECORDS_DIR" \
   KEYRYX_WITNESS_CUSTODY_URL="http://127.0.0.1:$KEYRYX_PORT" \
-  KEYRYX_WITNESS_ALERTS="$KEYRYX_WITNESS_DIR/alerts.ndjson" \
+  KEYRYX_WITNESS_ALERTS="$KEYRYX_ALERTS_FILE" \
     "$KEYRYX_BIN" witness > "$LOGS_DIR/keyryx-witness.log" 2>&1 &
   register keyryx-witness "$!" TERM
   # The witness is optional, unlike custody: the record is still sealed without it,
@@ -2568,7 +2577,9 @@ if [ "$WANT_NOTIFY" -eq 1 ]; then
   # deployments, where "high" keeps a real operator's inbox quiet until
   # something serious happens. Same variable, opposite correct default, for
   # two genuinely different audiences.
-  HERALDYX_EVENTS="$EVENTS_DIR" \
+  # The bus, and the keyryx witness's findings, which are not on the bus (invariant 32).
+  # A file that is not there yet (no witness this run) is skipped and looked for again.
+  HERALDYX_EVENTS="$EVENTS_DIR,$KEYRYX_ALERTS_FILE" \
   HERALDYX_TO="you@example.com" \
   HERALDYX_MAIL_FILE="$MAIL_FILE" \
   HERALDYX_STATE="$STACK_UP_HOME/heraldyx-state.json" \
@@ -3377,6 +3388,10 @@ if [ "$WITH_DELEGATION" -eq 1 ]; then
 fi
 if [ "$WANT_NOTIFY" -eq 1 ]; then
   log "mail:    $MAIL_FILE  (what the box would have written to you, unsent)"
+fi
+if [ "$WANT_KEYRYX" -eq 1 ]; then
+  log "witness: its findings are $KEYRYX_ALERTS_FILE, off the bus; heraldyx reads them, and so does a console started with"
+  printf '  GENARYX_EVENTS_EXTRA=%s\n' "$KEYRYX_ALERTS_FILE"
 fi
 if [ "$WITH_TYPED" -eq 1 ]; then
   log "typryx:  http://127.0.0.1:$TYPRYX_PORT  (key: $TYPRYX_SECRET, $TYPRYX_BACKEND backend, minted fresh this run)"

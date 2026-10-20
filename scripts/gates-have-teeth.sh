@@ -1519,8 +1519,64 @@ run_case "keyryx-is-per-run: the wardryx binary is not checked for the signer" f
 
 run_case "keyryx-is-per-run: the witness alerts go onto the shared bus" fail \
 	'./scripts/keyryx-is-per-run.sh' \
-	"$(py 'edit("up.sh", "KEYRYX_WITNESS_ALERTS=\"$KEYRYX_WITNESS_DIR/alerts.ndjson\"", "KEYRYX_WITNESS_ALERTS=\"$EVENTS_DIR/keyryx.ndjson\"")')" \
+	"$(py 'edit("up.sh", "KEYRYX_WITNESS_ALERTS=\"$KEYRYX_ALERTS_FILE\"", "KEYRYX_WITNESS_ALERTS=\"$EVENTS_DIR/keyryx.ndjson\"")')" \
 	"does not carry KEYRYX_WITNESS_ALERTS"
+
+# invariant 32: the witness's findings reach heraldyx and a console, and the witness never
+# writes the bus it witnesses.
+run_case "keyryx-alerts: the witness's findings directory is the bus" fail \
+	'./scripts/keyryx-alerts-reach-readers.sh' \
+	"$(py 'edit("up.sh", "KEYRYX_ALERTS_DIR=\"$KEYRYX_DIR/alerts\"", "KEYRYX_ALERTS_DIR=\"$EVENTS_DIR\"")')" \
+	"the bus it witnesses"
+
+run_case "keyryx-alerts: the witness's findings directory is its data directory" fail \
+	'./scripts/keyryx-alerts-reach-readers.sh' \
+	"$(py 'edit("up.sh", "KEYRYX_ALERTS_DIR=\"$KEYRYX_DIR/alerts\"", "KEYRYX_ALERTS_DIR=\"$KEYRYX_WITNESS_DIR\"")')" \
+	"is a data directory"
+
+run_case "keyryx-alerts: the witness writes its findings back into its data directory" fail \
+	'./scripts/keyryx-alerts-reach-readers.sh' \
+	"$(py 'edit("up.sh", "KEYRYX_WITNESS_ALERTS=\"$KEYRYX_ALERTS_FILE\"", "KEYRYX_WITNESS_ALERTS=\"$KEYRYX_WITNESS_DIR/alerts.ndjson\"")')" \
+	"does not write its findings to KEYRYX_WITNESS_ALERTS"
+
+run_case "keyryx-alerts: the findings directory is never made" fail \
+	'./scripts/keyryx-alerts-reach-readers.sh' \
+	"$(py 'edit("up.sh", "mkdir -p \"$KEYRYX_CUSTODY_DIR\" \"$KEYRYX_WITNESS_DIR\" \"$KEYRYX_ALERTS_DIR\"", "mkdir -p \"$KEYRYX_CUSTODY_DIR\" \"$KEYRYX_WITNESS_DIR\"")')" \
+	"never makes"
+
+run_case "keyryx-alerts: heraldyx is not told to read the findings" fail \
+	'./scripts/keyryx-alerts-reach-readers.sh' \
+	"$(py 'edit("up.sh", "HERALDYX_EVENTS=\"$EVENTS_DIR,$KEYRYX_ALERTS_FILE\"", "HERALDYX_EVENTS=\"$EVENTS_DIR\"")')" \
+	"heraldyx does not read the witness's findings"
+
+run_case "keyryx-alerts: the summary does not tell a console where the findings are" fail \
+	'./scripts/keyryx-alerts-reach-readers.sh' \
+	"$(py 'edit("up.sh", "  printf '"'"'  GENARYX_EVENTS_EXTRA=%s\\n'"'"' \"$KEYRYX_ALERTS_FILE\"\n", "")')" \
+	"does not tell a console"
+
+run_case "keyryx-alerts: another process is pointed at the findings file" fail \
+	'./scripts/keyryx-alerts-reach-readers.sh' \
+	"$(py 'edit("routines.sh", "\nset -uo pipefail\n", "\nset -uo pipefail\n: > \"$KEYRYX_ALERTS_FILE\"\n")')" \
+	"names the witness's findings outside"
+
+run_case "keyryx-alerts: a comment beside the findings directory is not a fault" pass \
+	'./scripts/keyryx-alerts-reach-readers.sh' \
+	"$(py 'edit("up.sh", "# The witness'"'"'s findings (invariant 32): a directory of their own,", "# The findings of the witness (invariant 32): a directory of their own,")')"
+
+run_case "keyryx-alerts: no witness start left to judge" fail \
+	'./scripts/keyryx-alerts-reach-readers.sh' \
+	"$(py 'edit("up.sh", "    \"$KEYRYX_BIN\" witness > ", "    \"$KEYRYX_BIN\" watch > ")')" \
+	"measured nothing"
+
+run_case "bus-files-match-sources: the witness's findings file loses its keyryx stem" fail \
+	'./scripts/bus-files-match-sources.sh' \
+	"$(py 'edit("up.sh", "KEYRYX_ALERTS_FILE=\"$KEYRYX_ALERTS_DIR/keyryx.ndjson\"", "KEYRYX_ALERTS_FILE=\"$KEYRYX_ALERTS_DIR/alerts.ndjson\"")')" \
+	"which heraldyx does not read as source keyryx"
+
+run_case "bus-files-match-sources: the heraldyx pin goes back before the keyryx source" fail \
+	'./scripts/bus-files-match-sources.sh' \
+	"$(py 'edit("up.sh", "    heraldyx)       echo \"v0.8.0 ", "    heraldyx)       echo \"v0.7.0 ")')" \
+	"older than v0.8.0"
 
 run_case "keyryx-is-per-run: the pin is a branch name, not a commit" fail \
 	'./scripts/keyryx-is-per-run.sh' \

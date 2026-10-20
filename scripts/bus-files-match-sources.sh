@@ -20,7 +20,11 @@
 # 1. Every stream file up.sh and routines.sh name under $EVENTS_DIR is on the
 #    table below. A new writer, or a renamed file, fails here until somebody has
 #    looked at what the readers will do with it.
-# 2. Every `--load <source>:<path>` this launcher passes to idryx names, as its
+# 2. The keyryx witness's findings, a stream OFF the bus that heraldyx reads
+#    (invariant 32): KEYRYX_ALERTS_FILE's stem is one heraldyx accepts as the source
+#    the witness stamps, `keyryx`, and the heraldyx the pin table names is v0.8.0 or
+#    later, the first whose table knows it.
+# 3. Every `--load <source>:<path>` this launcher passes to idryx names, as its
 #    source, one the file's stem may carry. `--load tokenfuse:$EVENTS_FILE` is
 #    tokenfuse.ndjson carrying tokenfuse; `--load tokenfuse:...wardryx.ndjson`
 #    would be refused line by line.
@@ -61,6 +65,9 @@ SOURCES = ["agent-conform", "console", "costcrew", "engram", "heraldyx", "idryx"
 ALLOWED = {s: {s} for s in SOURCES}
 ALLOWED["tokenfuse-cloud"] = {"tokenfuse"}
 ALLOWED["tokenfuse-mcp"] = {"tokenfuse"}
+# Off the bus (invariant 32): the witness's findings. heraldyx v0.8.0 is the first whose
+# knownSources carries keyryx, so the stem needs that pin.
+OFF_BUS = {"keyryx": ("keyryx", (0, 8, 0))}
 
 problems = 0
 streams = {}   # stem -> sorted list of "file:line" it is configured at
@@ -99,6 +106,30 @@ for path in sys.argv[1:]:
                 stem = mm.group(1) if mm else None
             loads.append((name, i, src, stem))
 
+up = open(sys.argv[1]).read()
+alerts = re.search(r"^KEYRYX_ALERTS_FILE=\"\$KEYRYX_ALERTS_DIR/([A-Za-z0-9][A-Za-z0-9._-]*)\.ndjson\"", up, re.M)
+if alerts is None:
+    print("FAIL: up.sh assigns no KEYRYX_ALERTS_FILE=\"$KEYRYX_ALERTS_DIR/<name>.ndjson\", so the witness's")
+    print("      findings stream, which heraldyx reads off the bus, measured NOTHING.")
+    problems += 1
+else:
+    stem = alerts.group(1)
+    if stem not in OFF_BUS:
+        print(f"FAIL: the witness's findings are {stem}.ndjson, which heraldyx does not read as source keyryx;")
+        print("      every finding would be refused. Name the file keyryx.ndjson.")
+        problems += 1
+    else:
+        pin = re.search(r"^\s+heraldyx\)\s+echo \"v(\d+)\.(\d+)\.(\d+) ", up, re.M)
+        least = OFF_BUS[stem][1]
+        if pin is None:
+            print("FAIL: the pin table names no heraldyx release, so nothing says its reader accepts keyryx.ndjson.")
+            problems += 1
+        elif tuple(int(x) for x in pin.groups()) < least:
+            print(f"FAIL: keyryx.ndjson is read by heraldyx v{'.'.join(pin.groups())}, older than "
+                  f"v{'.'.join(map(str, least))}, the first that accepts source keyryx: every finding is refused.")
+            problems += 1
+        else:
+            print(f"{stem + '.ndjson':<28} {'keyryx (off the bus)':<24} up.sh KEYRYX_ALERTS_FILE, heraldyx v{'.'.join(pin.groups())}")
 if not streams:
     print("FAIL: no `$EVENTS_DIR/<name>.ndjson` found in up.sh or routines.sh, so this measured NOTHING.")
     print("      That is not the same as the launcher configuring no stream.")

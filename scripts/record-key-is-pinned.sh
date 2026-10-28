@@ -14,7 +14,7 @@
 #
 # WHAT IT HOLDS
 #
-# 1. The pins: trailryx v1.5.0 (the first release that reads TRAILRYX_KEYRYX_KID) and keyryx v0.1.2
+# 1. The pins: trailryx v1.5.0 (the first release that reads TRAILRYX_KEYRYX_KID) and keyryx v0.1.3
 #    (attestations 0640, so the record plane can read them) are the pin table's entries, at their
 #    tags' commits.
 # 2. The launcher reads custody's key set (/v1/jwks/trailryx-root) and its state (/v1/state) once
@@ -64,8 +64,8 @@ fn_code() {
 # 1. the pins.
 grep -qE '^[[:space:]]+trailryx\)[[:space:]]+echo "v1\.5\.0 cf2439de8dc4b65ebad589e92ae4b9dd6dcac536" ;;' up.sh \
   || problem "the trailryx pin is not v1.5.0 at cf2439de8dc4b65ebad589e92ae4b9dd6dcac536 (the first release that reads TRAILRYX_KEYRYX_KID)"
-grep -qE '^[[:space:]]+keyryx\)[[:space:]]+echo "v0\.1\.2 21edb5c6744416cc0705434e9d0dc3489cc0c61e" ;;' up.sh \
-  || problem "the keyryx pin is not v0.1.2 at 21edb5c6744416cc0705434e9d0dc3489cc0c61e (attestations 0640)"
+grep -qE '^[[:space:]]+keyryx\)[[:space:]]+echo "v0\.1\.3 11df9c2faea31e06e2528a2163072bf7e341434f" ;;' up.sh \
+  || problem "the keyryx pin is not v0.1.3 at 11df9c2faea31e06e2528a2163072bf7e341434f (attestations 0640)"
 
 # 2 and 3. the pin is taken from custody's key set and active key, and the refusals say why.
 pin_fn="$(fn_code up.sh record_key_pin)"
@@ -133,4 +133,4 @@ grep -qF 'TODO(trailryx#112)' up.sh && problem "TODO(trailryx#112) is still in u
 if [ "$problems" -ne 0 ]; then
   exit 1
 fi
-echo "record-key-is-pinned: the record seal is pinned to custody's active trailryx-root key, taken from its key set and state, kept across runs, moved only by --repin-record-key; seal_node and trailryx_node pass the pin with the signer; trailryx v1.5.0 and keyryx v0.1.2 are pinned"
+echo "record-key-is-pinned: the record seal is pinned to custody's active trailryx-root key, taken from its key set and state, kept across runs, moved only by --repin-record-key; seal_node and trailryx_node pass the pin with the signer; trailryx v1.5.0 and keyryx v0.1.3 are pinned"

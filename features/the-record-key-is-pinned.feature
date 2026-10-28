@@ -7,12 +7,12 @@ Feature: the record seal is pinned to custody's active key, and the pin is never
   key, keeps it across runs, and changes it only when the operator asks. Every refusal says why, and
   the record is then not signed in that run.
 
-  Scenario: the pins are trailryx v1.5.0 and keyryx v0.1.2, at their tags' commits
+  Scenario: the pins are trailryx v1.5.0 and keyryx v0.1.3, at their tags' commits
     Given the pin table in up.sh
     When trailryx or keyryx is pinned to an older release or another commit
     Then record-key-is-pinned.sh fails
     # -> gates-have-teeth.sh "record-key-is-pinned: the trailryx pin is not v1.5.0"
-    # -> gates-have-teeth.sh "record-key-is-pinned: the keyryx pin is not v0.1.2"
+    # -> gates-have-teeth.sh "record-key-is-pinned: the keyryx pin is not v0.1.3"
 
   Scenario: the pin is read from custody's trailryx-root key set and its active key, and refused with a reason
     Given custody answers its key set and its state

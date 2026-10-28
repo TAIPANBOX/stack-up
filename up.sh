@@ -281,20 +281,27 @@ KEYRYX_TRAILRYX_KEY_PATH="$KEYRYX_DIR/trailryx.key"
 #
 # verdryx published its first release, v0.1.0, on 2026-10-19; before that it had no line
 # and was built only with --from-main.
+#
+# On 2026-10-28 nine Go components moved to their go1.27.3 patch releases (keyryx v0.1.3,
+# wardryx v2.4.1, vouchryx v0.6.1, idryx v1.3.1, heraldyx v0.8.2, scopyx v1.1.1, typryx v0.5.1,
+# qryx v1.1.1, mockryx v0.3.1), each commit read again with git ls-remote. A release whose
+# go.mod names toolchain go1.27.2 is built here with that toolchain, which carries
+# GO-2026-6809 in crypto/x509. costcrew v0.10.0 and agent-stack-go v2.0.1 have no newer
+# release and are unchanged.
 pin_of() {
   case "$1" in
-    keyryx)         echo "v0.1.2 21edb5c6744416cc0705434e9d0dc3489cc0c61e" ;;
+    keyryx)         echo "v0.1.3 11df9c2faea31e06e2528a2163072bf7e341434f" ;;
     tokenfuse)      echo "v1.19.0 84eabe61b0d5785d5198192c296ab1c58ab346bb" ;;
-    wardryx)        echo "v2.4.0 811da4a504e0f4a4918a733f86d5b787303e7f86" ;;
-    vouchryx)       echo "v0.6.0 d60e300edb8187482847fec30f188b0d561f5519" ;;
-    idryx)          echo "v1.3.0 ac69d395fa927d58fab853fdcceeb6d50f3a537d" ;;
-    heraldyx)       echo "v0.8.0 c3b080bb48e14fe2c0f8a0a41d9899e28ad13858" ;;
-    scopyx)         echo "v1.1.0 b23266e36902260a149a615cc8061a2dfee4969c" ;;
+    wardryx)        echo "v2.4.1 217fb8faa3e0f84fe1e08cad47da06c9bd99dab6" ;;
+    vouchryx)       echo "v0.6.1 9f47c25a585836b0bcb55a523105728b4308fb81" ;;
+    idryx)          echo "v1.3.1 035bfeeaa6709ba2142a3f621f71e72f81b252e0" ;;
+    heraldyx)       echo "v0.8.2 1492aae3087068a656101ca5985f21d3cec754d3" ;;
+    scopyx)         echo "v1.1.1 91ebdb087f027be64a492cef26a2fdbd4ea9af04" ;;
     costcrew)       echo "v0.10.0 a3549f2997953e92d01658758c831f5dc92776a3" ;;
-    typryx)         echo "v0.5.0 d5d4c0c331f4829dd564e9ee8505583cdb52dbf9" ;;
+    typryx)         echo "v0.5.1 3a3184dd7567423e322a1fcce472ead9d93a8ee1" ;;
     trailryx)       echo "v1.5.0 cf2439de8dc4b65ebad589e92ae4b9dd6dcac536" ;;
-    qryx)           echo "v1.1.0 e2e776d648aa28ffa9971bb21bc828335c86a89c" ;;
-    mockryx)        echo "v0.3.0 14c954dcf8dbcca40b2fa28c5cf202372b8480fc" ;;
+    qryx)           echo "v1.1.1 432f0502f8d68623fdcd1a58b5e59711618527d9" ;;
+    mockryx)        echo "v0.3.1 81c78303a00eb74b50b783a40816be6110b4b64f" ;;
     agent-stack-go) echo "v2.0.1 e52e7fc98d77996429543d342b9bf9e7899304a0" ;;
     engram)         echo "v3.0.0 b0b72a87bda73b8ec1287ee6d2450dd60290a0b3" ;;
     verdryx)        echo "v0.1.0 42617d2268500e46b93302a93de7412522668e91" ;;

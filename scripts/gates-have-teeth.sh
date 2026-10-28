@@ -1575,12 +1575,12 @@ run_case "bus-files-match-sources: the witness's findings file loses its keyryx 
 
 run_case "bus-files-match-sources: the heraldyx pin goes back before the keyryx source" fail \
 	'./scripts/bus-files-match-sources.sh' \
-	"$(py 'edit("up.sh", "    heraldyx)       echo \"v0.8.0 ", "    heraldyx)       echo \"v0.7.0 ")')" \
+	"$(py 'edit("up.sh", "    heraldyx)       echo \"v0.8.2 ", "    heraldyx)       echo \"v0.7.0 ")')" \
 	"older than v0.8.0"
 
 run_case "keyryx-is-per-run: the pin is a branch name, not a commit" fail \
 	'./scripts/keyryx-is-per-run.sh' \
-	"$(py 'edit("up.sh", "echo \"v0.1.2 21edb5c6744416cc0705434e9d0dc3489cc0c61e\" ;;", "echo \"main\" ;;")')" \
+	"$(py 'edit("up.sh", "echo \"v0.1.3 11df9c2faea31e06e2528a2163072bf7e341434f\" ;;", "echo \"main\" ;;")')" \
 	"keyryx is not pinned to a commit"
 
 run_case "keyryx-is-per-run: no custody start to judge" fail \
@@ -1941,10 +1941,10 @@ run_case "record-key-is-pinned: the trailryx pin is not v1.5.0" fail \
 	"$(py 'edit("up.sh", "trailryx)       echo \"v1.5.0 cf2439de8dc4b65ebad589e92ae4b9dd6dcac536\"", "trailryx)       echo \"v1.4.0 8e3bb7b454aed49b2bb20e975e63ec54136cc17d\"")')" \
 	"the trailryx pin is not v1.5.0"
 
-run_case "record-key-is-pinned: the keyryx pin is not v0.1.2" fail \
+run_case "record-key-is-pinned: the keyryx pin is not v0.1.3" fail \
 	'./scripts/record-key-is-pinned.sh' \
-	"$(py 'edit("up.sh", "keyryx)         echo \"v0.1.2 21edb5c6744416cc0705434e9d0dc3489cc0c61e\"", "keyryx)         echo \"v0.1.1 7384897fff61738cfa9dbbe54c24061dbe65251b\"")')" \
-	"the keyryx pin is not v0.1.2"
+	"$(py 'edit("up.sh", "keyryx)         echo \"v0.1.3 11df9c2faea31e06e2528a2163072bf7e341434f\"", "keyryx)         echo \"v0.1.2 21edb5c6744416cc0705434e9d0dc3489cc0c61e\"")')" \
+	"the keyryx pin is not v0.1.3"
 
 run_case "record-key-is-pinned: record_key_pin does not read custody's trailryx-root key set" fail \
 	'./scripts/record-key-is-pinned.sh' \

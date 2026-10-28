@@ -587,7 +587,7 @@ building here and the thing that most often gets skipped.
     signed by custody and not by a shared secret. `@claude 2026-10-18`: the shape here is my reading of
     that decision for a launcher, not a stated decision. `up.sh` builds keyryx from the commit that
     tag and commit in the pin table names, refused unless the clone is that commit (invariant 29), because keyryx's releases are
-    container images with no binary and this launcher runs no containers. The pin is keyryx v0.1.2 (invariant 31). It mints the bearer key wardryx
+    container images with no binary and this launcher runs no containers. The pin is keyryx v0.1.3 (invariant 31; v0.1.2 until 2026-10-28). It mints the bearer key wardryx
     presents to custody per run (`rand_hex 24`, written with no trailing newline, refused when empty),
     and the custody and witness root keys (`rand_hex 32`, each in its own 0600 file under
     `$STACK_UP_HOME/keyryx`) once, when their file is absent. `@decided 2026-10-19` (paraphrased): the
@@ -708,7 +708,11 @@ building here and the thing that most often gets skipped.
     `@decided 2026-10-19`, paraphrased: a build is what a release says it is, so a component is checked out at
     a tag and its commit, and a checkout that is not that commit is refused. `@claude 2026-10-19`: the table is
     `pin_of` in up.sh; each line was read from the repository's remote tags (git ls-remote, the peeled commit)
-    on that date. Every component has a release (verdryx's first, v0.1.0, since 2026-10-19), and
+    on that date. `@claude 2026-10-28`: nine Go components moved to their go1.27.3 patch releases for
+    GO-2026-6809 (crypto/x509), each commit read again the same way: keyryx v0.1.3, wardryx v2.4.1, vouchryx
+    v0.6.1, idryx v1.3.1, heraldyx v0.8.2, scopyx v1.1.1, typryx v0.5.1, qryx v1.1.1, mockryx v0.3.1. A pinned
+    release is built with the toolchain its go.mod names, so a release on go1.27.2 stays vulnerable here until
+    the pin moves. Every component has a release (verdryx's first, v0.1.0, since 2026-10-19), and
     `--from-main` builds sibling or main checkouts and says so at the top of the run.
     *(gate: `scripts/pins-are-release-tags.sh`: each table entry is a release tag and a full 40-hex commit,
     every component the launcher builds has an entry, locate_repo (the sibling lookup) is called only from
@@ -763,8 +767,8 @@ building here and the thing that most often gets skipped.
     `seal_node` (up.sh) and `trailryx_node` (routines.sh) pass the pin with the signer, and drop it when they do
     not sign. The kid is a public thumbprint and may be logged; the key set and the state are never logged.
     `@claude 2026-10-19`: the pin is the trailryx v1.5.0 release's own contract, so the launcher pins that release
-    (tag v1.5.0 at cf2439de8dc4b65ebad589e92ae4b9dd6dcac536) and keyryx v0.1.2 (tag at 21edb5c6744416cc0705434e9d0dc3489cc0c61e,
-    attestations 0640).
+    (tag v1.5.0 at cf2439de8dc4b65ebad589e92ae4b9dd6dcac536) and keyryx v0.1.3 (tag at 11df9c2faea31e06e2528a2163072bf7e341434f,
+    attestations 0640; `@claude 2026-10-28`: v0.1.3 is v0.1.2 on go1.27.3, its tag commit read again with git ls-remote).
     *(gate: `scripts/record-key-is-pinned.sh`: the trailryx and keyryx pins; record_key_pin reads custody's
     trailryx-root key set and state and takes the active key, checks each P-384 kid against its RFC 7638
     thumbprint, refuses on the reasons its text names, checks a kept pin, an install pin and a repin against the
@@ -783,7 +787,7 @@ building here and the thing that most often gets skipped.
     could write the record could add to what it vouches for. `@claude 2026-10-20`: the witness wrote
     `alerts.ndjson` in its own data directory, beside its keys and its log, a temporary choice while
     heraldyx could not render the keyryx source (components.json, superseded), so nothing read it.
-    heraldyx v0.8.0, the pin here, renders the seven `witness_*` types (agent-passport SPEC 6.2, source
+    heraldyx v0.8.0 (the first to render them; the pin is v0.8.2 since 2026-10-28) renders the seven `witness_*` types (agent-passport SPEC 6.2, source
     `keyryx`). Now `KEYRYX_ALERTS_FILE` is `$STACK_UP_HOME/keyryx/alerts/keyryx.ndjson`, a directory of
     its own made 0700 before the witness starts; the witness writes it as `KEYRYX_WITNESS_ALERTS` and
     still reads the bus as `KEYRYX_WITNESS_EVENTS`; heraldyx reads `HERALDYX_EVENTS="$EVENTS_DIR,$KEYRYX_ALERTS_FILE"`

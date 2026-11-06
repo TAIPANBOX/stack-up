@@ -81,7 +81,7 @@ expect() { # <name> <exit> <status> <needle in reason or summary, may be empty>
   got="$(field status)"; reason="$(field reason)"; summary="$(field summary)"
   if [ "$rc" -ne "$want_rc" ]; then bad "$name: routine exit $rc, wanted $want_rc"; return; fi
   if [ "$got" != "$want_status" ]; then bad "$name: recorded status '$got', wanted '$want_status'"; return; fi
-  if [ -n "$needle" ] && ! printf '%s %s' "$reason" "$summary" | grep -qF -- "$needle"; then
+  if [ -n "$needle" ] && ! grep -qF -- "$needle" <<<"$reason $summary"; then
     bad "$name: the record does not say: $needle (reason: $reason | summary: $summary)"
   fi
 }

@@ -74,7 +74,7 @@ grep -qE '\[ "\$WITHOUT_KEYRYX" -eq 1 \] && WANT_KEYRYX=0' up.sh || problem "--w
 # under WANT_KEYRYX too, and is not the block that starts custody).
 state_at="$(grep -n -E '^KEYRYX_SIGNING=0$' up.sh | head -1 | cut -d: -f1)"
 block_at=""
-if [ -n "$state_at" ] && sed -n "$((state_at + 1))p" up.sh | grep -qE '^if \[ "\$WANT_KEYRYX" -eq 1 \]; then$'; then
+if [ -n "$state_at" ] && grep -qE '^if \[ "\$WANT_KEYRYX" -eq 1 \]; then$' <<<"$(sed -n "$((state_at + 1))p" up.sh)"; then
   block_at=$((state_at + 1))
 fi
 custody_at="$(grep -n -F '"$KEYRYX_BIN" custody' up.sh | head -1 | cut -d: -f1)"
@@ -87,7 +87,7 @@ grep -qE '^RECORDS_TENANT="acme"$' up.sh || problem "RECORDS_TENANT is not set t
 witness_lines="$(code up.sh | grep -F '"$KEYRYX_BIN" witness' || true)"
 if [ -z "$witness_lines" ]; then
   problem "no keyryx witness start in up.sh: measured nothing"
-elif ! printf '%s\n' "$witness_lines" | grep -qF 'KEYRYX_WITNESS_RECORDS="$RECORDS_TENANT|$RECORDS_DIR"'; then
+elif ! grep -qF 'KEYRYX_WITNESS_RECORDS="$RECORDS_TENANT|$RECORDS_DIR"' <<<"$witness_lines"; then
   problem "the witness start does not read the seal's records (KEYRYX_WITNESS_RECORDS=\"\$RECORDS_TENANT|\$RECORDS_DIR\")"
 fi
 
@@ -96,15 +96,15 @@ seal_body="$(fn_code up.sh seal_node)"
 if [ -z "$seal_body" ]; then
   problem "up.sh defines no seal_node: measured nothing"
 else
-  printf '%s\n' "$seal_body" | grep -qF 'if [ "$KEYRYX_SIGNING" -eq 1 ]; then' || problem "seal_node does not branch on KEYRYX_SIGNING"
+  grep -qF 'if [ "$KEYRYX_SIGNING" -eq 1 ]; then' <<<"$seal_body" || problem "seal_node does not branch on KEYRYX_SIGNING"
   for want in 'TRAILRYX_SIGNER=keyryx' 'TRAILRYX_KEYRYX_URL="http://127.0.0.1:$KEYRYX_PORT"' \
               'TRAILRYX_KEYRYX_CREDENTIAL_FILE="$KEYRYX_TRAILRYX_KEY_PATH"' \
               'TRAILRYX_WITNESS_ATTESTATIONS="$KEYRYX_WITNESS_DIR/attestations"'; do
-    printf '%s\n' "$seal_body" | grep -qF -- "$want" || problem "seal_node does not set $want when signing"
+    grep -qF -- "$want" <<<"$seal_body" || problem "seal_node does not set $want when signing"
   done
   env_line="$(printf '%s\n' "$seal_body" | grep -E 'env( -u [A-Z_]+)+' || true)"
   for name in TRAILRYX_SIGNER TRAILRYX_KEYRYX_URL TRAILRYX_KEYRYX_CREDENTIAL_FILE TRAILRYX_WITNESS_ATTESTATIONS; do
-    printf '%s\n' "$env_line" | grep -qF -- "-u $name" || problem "seal_node does not remove $name when not signing (env -u $name)"
+    grep -qF -- "-u $name" <<<"$env_line" || problem "seal_node does not remove $name when not signing (env -u $name)"
   done
 fi
 bare="$(code up.sh | grep -E '"\$NODE_BIN" (events|read)' | grep -v -F 'seal_node' || true)"
@@ -112,7 +112,7 @@ bare="$(code up.sh | grep -E '"\$NODE_BIN" (events|read)' | grep -v -F 'seal_nod
 seal_calls="$(code up.sh | grep -E 'seal_node (events|read)' || true)"
 if [ -z "$seal_calls" ]; then
   problem "no seal_node call in up.sh: measured nothing"
-elif printf '%s\n' "$seal_calls" | grep -qv -- '--tenant "$RECORDS_TENANT"'; then
+elif printf '%s\n' "$seal_calls" | grep -cv -- '--tenant "$RECORDS_TENANT"' >/dev/null; then
   problem "a seal_node call does not name the tenant the witness reads (--tenant \"\$RECORDS_TENANT\")"
 fi
 
@@ -140,10 +140,10 @@ rnode="$(fn_code routines.sh trailryx_node)"
 if [ -z "$rnode" ]; then
   problem "routines.sh defines no trailryx_node: measured nothing"
 else
-  printf '%s\n' "$rnode" | grep -qF 'TRAILRYX_SIGNER=keyryx' || problem "trailryx_node does not set TRAILRYX_SIGNER=keyryx when signing"
-  printf '%s\n' "$rnode" | grep -qF 'env -u TRAILRYX_SIGNER' || problem "trailryx_node does not remove TRAILRYX_SIGNER when not signing"
+  grep -qF 'TRAILRYX_SIGNER=keyryx' <<<"$rnode" || problem "trailryx_node does not set TRAILRYX_SIGNER=keyryx when signing"
+  grep -qF 'env -u TRAILRYX_SIGNER' <<<"$rnode" || problem "trailryx_node does not remove TRAILRYX_SIGNER when not signing"
 fi
-code routines.sh | grep -qF 'record-signing' || problem "routines.sh does not read the record signing state up.sh writes"
+grep -qF 'record-signing' <<<"$(code routines.sh)" || problem "routines.sh does not read the record signing state up.sh writes"
 rbare="$(code routines.sh | grep -E '"\$node" (events|read)' | grep -v -F 'trailryx_node' || true)"
 [ -z "$rbare" ] || problem "routines.sh runs the node binary bare for a seal call, not through trailryx_node"
 grep -qF '> "$KEYRYX_DIR/record-signing"' up.sh || problem "up.sh does not write the record signing state routines.sh reads"

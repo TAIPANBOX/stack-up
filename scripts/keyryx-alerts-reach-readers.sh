@@ -94,19 +94,19 @@ elif [ "$mk_line" -gt "$start_line" ]; then
 fi
 
 # 3. The witness reads the bus and writes its findings there.
-printf '%s\n' "$witness_lines" | grep -qF 'KEYRYX_WITNESS_EVENTS="$EVENTS_DIR"' \
+grep -qF 'KEYRYX_WITNESS_EVENTS="$EVENTS_DIR"' <<<"$witness_lines" \
   || problem "the witness start does not read the bus (KEYRYX_WITNESS_EVENTS=\"\$EVENTS_DIR\")"
-printf '%s\n' "$witness_lines" | grep -qF 'KEYRYX_WITNESS_ALERTS="$KEYRYX_ALERTS_FILE"' \
+grep -qF 'KEYRYX_WITNESS_ALERTS="$KEYRYX_ALERTS_FILE"' <<<"$witness_lines" \
   || problem "the witness start does not write its findings to KEYRYX_WITNESS_ALERTS=\"\$KEYRYX_ALERTS_FILE\""
 
 # 4. heraldyx reads both.
 hv="$(printf '%s\n' "$heraldyx_lines" | grep -oE 'HERALDYX_EVENTS="[^"]*"' | head -1 | sed -e 's/^HERALDYX_EVENTS="//' -e 's/"$//')"
-has_entry() { printf '%s\n' "$hv" | tr ',' '\n' | grep -qxF -- "$1"; }
+has_entry() { grep -qxF -- "$1" <<<"$(printf '%s\n' "$hv" | tr ',' '\n')"; }
 has_entry '$EVENTS_DIR' || problem "heraldyx does not read the bus (HERALDYX_EVENTS is \"$hv\")"
 has_entry '$KEYRYX_ALERTS_FILE' || problem "heraldyx does not read the witness's findings (HERALDYX_EVENTS is \"$hv\")"
 
 # 5. A console started by hand is told where they are.
-code up.sh | grep -F 'GENARYX_EVENTS_EXTRA' | grep -qF '$KEYRYX_ALERTS_FILE' \
+grep -qF '$KEYRYX_ALERTS_FILE' <<<"$(code up.sh | grep -F 'GENARYX_EVENTS_EXTRA')" \
   || problem "the summary does not tell a console GENARYX_EVENTS_EXTRA=\$KEYRYX_ALERTS_FILE"
 
 # 6. Nothing else names the file.
@@ -123,7 +123,7 @@ for f in up.sh routines.sh down.sh; do
     esac
     echo "keyryx-alerts: $f names the witness's findings outside the witness, heraldyx and the summary: $line"
   done
-done | tee /dev/stderr | grep -q . && problems=$((problems + 1))
+done | tee /dev/stderr | grep -c . >/dev/null && problems=$((problems + 1))
 
 if [ "$problems" -gt 0 ]; then
   echo "keyryx-alerts: $problems problem(s); see CLAUDE.md invariant 32"

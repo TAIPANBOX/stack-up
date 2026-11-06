@@ -72,20 +72,20 @@ pin_fn="$(fn_code up.sh record_key_pin)"
 if [ -z "$pin_fn" ]; then
   problem "up.sh defines no record_key_pin: measured nothing"
 else
-  printf '%s\n' "$pin_fn" | grep -qF '/v1/jwks/trailryx-root' || problem "record_key_pin does not read custody's trailryx-root key set (/v1/jwks/trailryx-root)"
-  printf '%s\n' "$pin_fn" | grep -qF '/v1/state' || problem "record_key_pin does not read custody's state (/v1/state), for the active key"
-  printf '%s\n' "$pin_fn" | grep -qF 'active_kid' || problem "record_key_pin does not take the active key (active_kid) from custody's state"
+  grep -qF '/v1/jwks/trailryx-root' <<<"$pin_fn" || problem "record_key_pin does not read custody's trailryx-root key set (/v1/jwks/trailryx-root)"
+  grep -qF '/v1/state' <<<"$pin_fn" || problem "record_key_pin does not read custody's state (/v1/state), for the active key"
+  grep -qF 'active_kid' <<<"$pin_fn" || problem "record_key_pin does not take the active key (active_kid) from custody's state"
   for why in 'holds no ES384 key' 'takes exactly one' 'is not its RFC 7638 thumbprint' \
              'is not the active key' 'is not in custody' 'is not a 43-character thumbprint' \
              'rotate on purpose with --repin-record-key'; do
     grep -qF -- "$why" up.sh || problem "no refusal reason says: $why"
   done
-  printf '%s\n' "$pin_fn" | grep -qF 'key.get("kid") != thumbprint(key)' || problem "record_key_pin does not check the kid against its RFC 7638 thumbprint"
-  printf '%s\n' "$pin_fn" | grep -qF 'if pinned != active:' || problem "record_key_pin does not check a kept pin against the active key"
-  printf '%s\n' "$pin_fn" | grep -qF 'if es384[0] != active:' || problem "record_key_pin does not check the install pin against the active key"
-  printf '%s\n' "$pin_fn" | grep -qF 'if active not in es384:' || problem "record_key_pin does not check a repin against the key set"
-  printf '%s\n' "$pin_fn" | grep -qF 'chmod 600 "$KEYRYX_RECORD_KID_FILE"' || problem "record_key_pin does not keep the pin file private (chmod 600)"
-  printf '%s\n' "$pin_fn" | grep -qF 'umask 077' || problem "record_key_pin does not write the pin under umask 077"
+  grep -qF 'key.get("kid") != thumbprint(key)' <<<"$pin_fn" || problem "record_key_pin does not check the kid against its RFC 7638 thumbprint"
+  grep -qF 'if pinned != active:' <<<"$pin_fn" || problem "record_key_pin does not check a kept pin against the active key"
+  grep -qF 'if es384[0] != active:' <<<"$pin_fn" || problem "record_key_pin does not check the install pin against the active key"
+  grep -qF 'if active not in es384:' <<<"$pin_fn" || problem "record_key_pin does not check a repin against the key set"
+  grep -qF 'chmod 600 "$KEYRYX_RECORD_KID_FILE"' <<<"$pin_fn" || problem "record_key_pin does not keep the pin file private (chmod 600)"
+  grep -qF 'umask 077' <<<"$pin_fn" || problem "record_key_pin does not write the pin under umask 077"
 fi
 grep -qF '"$KEYRYX_DIR/trailryx.kid"' up.sh || problem "the pin is not kept in \$KEYRYX_DIR/trailryx.kid"
 
@@ -98,18 +98,18 @@ seal_body="$(fn_code up.sh seal_node)"
 if [ -z "$seal_body" ]; then
   problem "up.sh defines no seal_node: measured nothing"
 else
-  printf '%s\n' "$seal_body" | grep -qF 'TRAILRYX_KEYRYX_KID="$KEYRYX_RECORD_KID"' \
+  grep -qF 'TRAILRYX_KEYRYX_KID="$KEYRYX_RECORD_KID"' <<<"$seal_body" \
     || problem "seal_node does not pass the pinned kid (TRAILRYX_KEYRYX_KID=\"\$KEYRYX_RECORD_KID\") when signing"
-  printf '%s\n' "$seal_body" | grep -E 'env( -u [A-Z_]+)+' | grep -qF -- '-u TRAILRYX_KEYRYX_KID' \
+  grep -qF -- '-u TRAILRYX_KEYRYX_KID' <<<"$(printf '%s\n' "$seal_body" | grep -E 'env( -u [A-Z_]+)+')" \
     || problem "seal_node does not remove TRAILRYX_KEYRYX_KID when not signing"
 fi
 rnode="$(fn_code routines.sh trailryx_node)"
 if [ -z "$rnode" ]; then
   problem "routines.sh defines no trailryx_node: measured nothing"
 else
-  printf '%s\n' "$rnode" | grep -qF 'TRAILRYX_KEYRYX_KID=' || problem "trailryx_node does not pass the pinned kid when signing"
-  printf '%s\n' "$rnode" | grep -qF 'cat "$keyryx_dir/trailryx.kid"' || problem "trailryx_node does not read the pin file (trailryx.kid)"
-  printf '%s\n' "$rnode" | grep -E 'env( -u [A-Z_]+)+' | grep -qF -- '-u TRAILRYX_KEYRYX_KID' \
+  grep -qF 'TRAILRYX_KEYRYX_KID=' <<<"$rnode" || problem "trailryx_node does not pass the pinned kid when signing"
+  grep -qF 'cat "$keyryx_dir/trailryx.kid"' <<<"$rnode" || problem "trailryx_node does not read the pin file (trailryx.kid)"
+  grep -qF -- '-u TRAILRYX_KEYRYX_KID' <<<"$(printf '%s\n' "$rnode" | grep -E 'env( -u [A-Z_]+)+')" \
     || problem "trailryx_node does not remove TRAILRYX_KEYRYX_KID when not signing"
 fi
 
@@ -123,7 +123,7 @@ elif [ -z "$signed_at" ] || [ "$signed_at" -lt "$pin_call" ]; then
 fi
 
 # 7. the key set and the state never reach a log line.
-if code up.sh | grep -E '(^|[^A-Za-z0-9_])(log|warn|die|echo|printf)[[:space:]]' | grep -qE '[$](keyset_json|state_json)'; then
+if grep -qE '[$](keyset_json|state_json)' <<<"$(code up.sh | grep -E '(^|[^A-Za-z0-9_])(log|warn|die|echo|printf)[[:space:]]')"; then
   problem "a log, warn, die, echo or printf line names the key set or the state document"
 fi
 

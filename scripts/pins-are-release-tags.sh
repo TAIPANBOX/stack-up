@@ -78,7 +78,7 @@ while IFS= read -r line; do
     '*') continue ;;
   esac
   labels="$labels $label"
-  if printf '%s\n' "$line" | grep -qE '^[[:space:]]+[a-z-]+\)[[:space:]]+echo "v[0-9]+[.][0-9]+[.][0-9]+ [0-9a-f]{40}" ;;[[:space:]]*$'; then
+  if grep -qE '^[[:space:]]+[a-z-]+\)[[:space:]]+echo "v[0-9]+[.][0-9]+[.][0-9]+ [0-9a-f]{40}" ;;[[:space:]]*$' <<<"$line"; then
     entries=$((entries + 1))
   else
     problem "pin_of entry for $label is not a release tag and a full commit: $(printf '%s' "$line" | sed -E 's/^[[:space:]]+//')"
@@ -119,11 +119,11 @@ for n in $(call_lines 'git clone'); do
 done
 
 pinned_body="$(sed -n "${pr_start},${pr_end}p" up.sh)"
-printf '%s\n' "$pinned_body" | grep -qF -- '--branch "$tag"' \
+grep -qF -- '--branch "$tag"' <<<"$pinned_body" \
   || problem "pinned_repo does not clone the release tag (--branch \"\$tag\")"
-printf '%s\n' "$pinned_body" | grep -qF -- 'rev-parse HEAD' \
+grep -qF -- 'rev-parse HEAD' <<<"$pinned_body" \
   || problem "pinned_repo does not read the HEAD of the checkout it is about to build"
-printf '%s\n' "$pinned_body" | grep -F -- '= "$commit" ] ||' | grep -q 'return 1' \
+grep -q 'return 1' <<<"$(printf '%s\n' "$pinned_body" | grep -F -- '= "$commit" ] ||')" \
   || problem "pinned_repo does not refuse a checkout that is not the pinned commit"
 
 # 5. --from-main is a flag, and it says the build is not the pinned release.

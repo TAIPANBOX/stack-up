@@ -88,17 +88,17 @@ expect() {
   n=$((n + 1))
   run "$@"
   if [ "$rc" -ne "$want" ]; then bad "$name: exit $rc, wanted $want"; return; fi
-  if [ -n "$needle" ] && ! printf '%s' "$out" | grep -qF -- "$needle"; then
+  if [ -n "$needle" ] && ! grep -qF -- "$needle" <<<"$out"; then
     bad "$name: output does not say: $needle"; return
   fi
-  if printf '%s' "$out" | grep -qF -- "$FAKE_KEY"; then
+  if grep -qF -- "$FAKE_KEY" <<<"$out"; then
     bad "$name: the key's CONTENT is in the output"; return
   fi
 }
 
 # has / lacks check the output of the last expect.
-has() { n=$((n + 1)); printf '%s' "$out" | grep -qF -- "$1" || bad "last plan does not contain: $1"; }
-lacks() { n=$((n + 1)); ! printf '%s' "$out" | grep -qF -- "$1" || bad "last plan contains: $1"; }
+has() { n=$((n + 1)); grep -qF -- "$1" <<<"$out" || bad "last plan does not contain: $1"; }
+lacks() { n=$((n + 1)); ! grep -qF -- "$1" <<<"$out" || bad "last plan contains: $1"; }
 
 # Every plan's env lines must have all `-u` before the first NAME=VALUE: `env`
 # stops reading options at the first assignment and would run a later `-u` as

@@ -63,7 +63,7 @@ for req in \
   '    min_probability: 0.8' \
   '    when_absent: hold'
 do
-  printf '%s\n' "$rule" | grep -qxF -- "$req" \
+  grep -qxF -- "$req" <<<"$rule" \
     || problem "rule stack-up-typed-risk-hold does not contain: $req"
 done
 
@@ -71,7 +71,7 @@ done
 grep -qF 'bin_reads_setting "$WARDRYX_BIN" when_absent' up.sh \
   || problem "the launcher does not check that the wardryx binary reads when_absent"
 if grep -qF 'bin_reads_setting "$WARDRYX_BIN" when_absent' up.sh; then
-  grep -n -A3 -F 'bin_reads_setting "$WARDRYX_BIN" when_absent' up.sh | grep -q 'die ' \
+  grep -q 'die ' <<<"$(grep -n -A3 -F 'bin_reads_setting "$WARDRYX_BIN" when_absent' up.sh)" \
     || problem "the check for when_absent does not refuse a wardryx that lacks it (no die within three lines)"
 fi
 

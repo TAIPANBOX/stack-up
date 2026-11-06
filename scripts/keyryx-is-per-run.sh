@@ -67,7 +67,7 @@ need() {
   local what="$1" lines="$2" text
   shift 2
   for text in "$@"; do
-    printf '%s\n' "$lines" | grep -qF -- "$text" || problem "$what does not carry $text"
+    grep -qF -- "$text" <<<"$lines" || problem "$what does not carry $text"
   done
 }
 
@@ -125,23 +125,23 @@ need "wardryx start" "$wardryx_lines" \
   'WARDRYX_APPROVAL_SIGNER=keyryx' \
   'WARDRYX_KEYRYX_URL=' \
   'WARDRYX_KEYRYX_CREDENTIAL_FILE="$KEYRYX_WARDRYX_KEY_PATH"'
-if printf '%s\n' "$wardryx_lines" | grep -qF 'WARDRYX_APPROVAL_SECRET='; then
+if grep -qF 'WARDRYX_APPROVAL_SECRET=' <<<"$wardryx_lines"; then
   problem "the wardryx start still takes WARDRYX_APPROVAL_SECRET"
 fi
-code | grep -qF 'bin_reads_setting "$WARDRYX_BIN" WARDRYX_APPROVAL_SIGNER' \
+grep -qF 'bin_reads_setting "$WARDRYX_BIN" WARDRYX_APPROVAL_SIGNER' <<<"$(code)" \
   || problem "the wardryx binary is not checked for WARDRYX_APPROVAL_SIGNER before it starts"
 
 # 6. No key value is logged, printed outside a file write, or put on a command line.
 for s in KEYRYX_CUSTODY_ROOT_KEY KEYRYX_WITNESS_ROOT_KEY KEYRYX_WARDRYX_KEY; do
   hits="$(code | grep -E "[$]${s}([^A-Za-z0-9_]|\$)" | grep -vF "[ -n \"\$$s\" ]" || true)"
   [ -z "$hits" ] && continue
-  if printf '%s\n' "$hits" | grep -qE '(^|[^A-Za-z0-9_])(log|warn|die|echo)([[:space:]]|$)'; then
+  if grep -qE '(^|[^A-Za-z0-9_])(log|warn|die|echo)([[:space:]]|$)' <<<"$hits"; then
     problem "$s reaches a log, warn, die or echo line"
   fi
-  if printf '%s\n' "$hits" | grep -E 'printf' | grep -qvF '> "'; then
+  if printf '%s\n' "$hits" | grep -E 'printf' | grep -cvF '> "' >/dev/null; then
     problem "$s is printed outside a file write"
   fi
-  if printf '%s\n' "$hits" | grep -qE '"\$KEYRYX_BIN"|"\$WARDRYX_BIN" serve'; then
+  if grep -qE '"\$KEYRYX_BIN"|"\$WARDRYX_BIN" serve' <<<"$hits"; then
     problem "$s is on the command line of a keyryx or wardryx process"
   fi
 done

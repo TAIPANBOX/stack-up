@@ -51,7 +51,7 @@ while IFS= read -r line; do
       continue
       ;;
   esac
-  if ! printf '%s' "$text" | grep -qE 'VOUCHRYX_TRUSTED_ISSUERS="[^"]*\|unbound"'; then
+  if ! grep -qE 'VOUCHRYX_TRUSTED_ISSUERS="[^"]*\|unbound"' <<<"$text"; then
     echo "FAIL: $LAUNCHER:$lineno: the demo issuer's trusted line does not end in |unbound"
     echo "      vouchryx v0.5.0 and later refuse its tokens without the marker (invariant 24)"
     problems=$((problems + 1))
@@ -64,7 +64,7 @@ while IFS= read -r line; do
   [ -n "$line" ] || continue
   lineno="${line%%:*}"
   text="${line#*:}"
-  if ! printf '%s' "$text" | grep -q 'idp\.stack-up\.local'; then
+  if ! grep -q 'idp\.stack-up\.local' <<<"$text"; then
     echo "FAIL: $LAUNCHER:$lineno carries |unbound on a line that is not the demo issuer's"
     echo "      an operator's own issuer with no cnf.jkt is a bearer credential (invariant 24)"
     problems=$((problems + 1))

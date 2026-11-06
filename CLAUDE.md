@@ -56,6 +56,7 @@ bash -n up.sh && bash -n down.sh && bash -n routines.sh
 ./scripts/demo-runs-after-its-planes.sh
 ./scripts/pins-are-release-tags.sh
 ./scripts/risk-hold-is-seeded.sh
+./scripts/no-reader-leaves-a-pipe-early.sh
 ./scripts/gates-have-teeth.sh   # invariant 6; needs a clean tree
 ```
 
@@ -806,6 +807,35 @@ building here and the thing that most often gets skipped.
     in `gates-have-teeth.sh`. Not covered: a running witness writing a finding and heraldyx writing it to
     `mail.txt`, which needs built binaries and was not run; read-only by uid, which this one-user
     launcher cannot give (invariant 23); and a console reading the file, since none is started here.)*
+
+33. **A check says what the text holds, not which of a writer and its reader finished first.**
+    `@claude 2026-11-06`, carried from stack-k8s#226 and stack-single#167; it records no decision of
+    the owner. `printf ... | grep -q` under `set -o pipefail` reports the writer as well as the
+    reader: grep -q leaves at its first match, a writer with more to write takes SIGPIPE, the
+    pipeline returns 141, and a line that is there reads as missing. Text of one write cannot fail
+    and text over one buffer can, so the rate follows the load on the machine. The negative form is
+    the worse one, since `if ... | grep -q bad` reads a 141 as clean. @measured forge, 4 cores, bash 5.2.37, GNU grep 3.11, 2026-11-06,
+    `gate-loop.sh` beside six busy loops (estate-gates `evidence/pipe-readers-2026-11-06/`):
+    `scripts/typed-mode.sh` at `e5bbf42` failed 5 of 100 runs on a tree with nothing wrong in it,
+    saying a plan did not hold a line it held; the nine gates that carried the construct failed 5 of
+    900, and 0 of 900 once fixed.
+    Every pipe into `grep -q`, `--quiet`, `--silent`, `-m`, `--max-count`, `-l` or `-L` in live shell
+    code here moved, 49 in 10 files: to a here-string, `grep -q x <<<"$text"`, and to a pipe into
+    `grep -c x >/dev/null` where a `-v` would turn an empty here-string around, or where `tee` has to
+    keep printing every line it is given. Four of those files carried no `pipefail`, so they could
+    not go red today; the rule holds them anyway, because `set -o pipefail` is one line away and
+    nothing in the file says it is load-bearing that it is missing.
+    *(gate: `scripts/no-reader-leaves-a-pipe-early.sh`. (A) A control: 2.7 MB into grep -q under
+    pipefail must fail five times of five, and pass five of five with pipefail off, through a
+    here-string and into grep -c. (B) Lines with a known answer go through the reader before any file
+    does, because a reader that has stopped matching reports what a clean tree reports. (C) Every
+    tracked `*.sh`, `.githooks/*`, bash-shebang file and workflow `run:` step is masked down to live
+    code and read: comments, quoted text and here-documents go, a `$(...)` inside double quotes
+    stays. It refuses to report OK on no shell file, no pipe, no workflow step, or a file it lost its
+    place in. Nineteen cases in `gates-have-teeth.sh`; scenarios in
+    `features/a-check-does-not-depend-on-which-process-finished-first.feature`, each bound to a case.
+    Not held: `| head`, which is the same race; every one here takes a few lines from a writer of a
+    few lines, which is one write.)*
 
 An approved architecture decision is **not finished** until it is two things: a
 numbered invariant in this file, and a gate in a script if it can be checked

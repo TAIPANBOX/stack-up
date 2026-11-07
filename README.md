@@ -509,8 +509,8 @@ passes. Only a grant lifts the hold, and a restriction never does: the demo rule
 `agent://mockryx.local/*` restrict and grant nothing. `grant-drills` is the two stacks'
 rule for the fire-drill identities, and `grant-broker-demo` keeps the example this run
 prints working, for that one tool and that one id. The launcher refuses a wardryx that
-does not read `when_no_grant` before it starts one (wardryx v2.6.0; the pin below is that
-release, with tokenfuse v1.23.0, whose broker says why it held).
+does not read `when_no_grant` before it starts one. This launcher pins wardryx v2.6.0, which
+reads it, and tokenfuse v1.23.0, whose broker says why it held.
 
 To give an agent of yours a tool for this run, write a grant. A target has to name a
 trust domain, and `"*"` in `grant_tool` is every tool:

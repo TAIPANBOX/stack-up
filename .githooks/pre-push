@@ -61,6 +61,7 @@ step "bus directory stays this user's" "./scripts/bus-is-operator-owned.sh"
 step "demo runs after the planes that answer it" "./scripts/demo-runs-after-its-planes.sh"
 step "every component built from a release tag" "./scripts/pins-are-release-tags.sh"
 step "typed risk signal holds what it never reaches" "./scripts/risk-hold-is-seeded.sh"
+step "the tool hold goes with the flag" "./scripts/tool-hold-is-seeded.sh"
 step "no pipe ends in a grep that leaves early" "./scripts/no-reader-leaves-a-pipe-early.sh"
 
 echo

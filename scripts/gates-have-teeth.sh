@@ -1775,16 +1775,96 @@ run_case "risk-hold-is-seeded: a comment that names when_absent: allow is not a 
 	'./scripts/risk-hold-is-seeded.sh' \
 	"$(py 'edit("up.sh", "# Wardryx (optional): policy decision point with the seeded demo policy.\n", "# Wardryx (optional): policy decision point with the seeded demo policy.\n# when_absent: allow is what a rule without the key does, and nothing here sets it.\n")')"
 
+# --- invariant 34: the tool hold goes with --typed-risk-signal, and only a grant lifts it ---
+
+run_case "tool-hold-is-seeded: the floor is written without the flag" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("up.sh", "    bin_reads_setting \"$WARDRYX_BIN\" when_no_grant \\", "  fi\n  if true; then\n    bin_reads_setting \"$WARDRYX_BIN\" when_no_grant \\")')" \
+	"outside the --typed-risk-signal guard"
+
+run_case "tool-hold-is-seeded: the floor narrows to ids with a scheme" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("up.sh", "- name: tool-hold\n  target: \"*\"", "- name: tool-hold\n  target: \"agent://*\"")')" \
+	'does not contain:   target: "*"'
+
+run_case "tool-hold-is-seeded: the floor is written as a word wardryx refuses" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("up.sh", "  when_no_grant: hold\n", "  when_no_grant: holds\n")')" \
+	"does not contain:   when_no_grant: hold"
+
+run_case "tool-hold-is-seeded: the drills lose their grant" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("up.sh", "- name: grant-drills\n  target: agent://mockryx.local/*\n  grant_tool: [\"*\"]\n", "")')" \
+	"does not contain: - name: grant-drills"
+
+run_case "tool-hold-is-seeded: the demo grant takes every tool" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("up.sh", "  grant_tool: [ask]\n", "  grant_tool: [\"*\"]\n")')" \
+	"does not contain:   grant_tool: [ask]"
+
+run_case "tool-hold-is-seeded: the demo grant is open to any door" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("up.sh", "  require_identity_source: [client-key]\n", "")')" \
+	"does not contain:   require_identity_source: [client-key]"
+
+run_case "tool-hold-is-seeded: a grant on every agent" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("up.sh", "- name: grant-drills\n  target: agent://mockryx.local/*\n", "- name: grant-drills\n  target: agent://*\n")')" \
+	"does not contain:   target: agent://mockryx.local/*"
+
+run_case "tool-hold-is-seeded: wardryx is not checked for when_no_grant" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("up.sh", "    bin_reads_setting \"$WARDRYX_BIN\" when_no_grant \\\n", "    bin_reads_setting \"$WARDRYX_BIN\" when_absent \\\n")')" \
+	"does not check that the wardryx binary reads when_no_grant"
+
+run_case "tool-hold-is-seeded: the check of when_no_grant does not refuse" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("up.sh", "      || die \"--typed-risk-signal needs wardryx v2.6.0 or newer", "      || warn \"--typed-risk-signal needs wardryx v2.6.0 or newer")')" \
+	"does not refuse a wardryx that lacks it"
+
+run_case "tool-hold-is-seeded: the wardryx pin falls below the floor" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("up.sh", "echo \"v2.6.0 99bd9326619c33d866fcba01b24584b6f2cbb898\"", "echo \"v2.5.1 99bd9326619c33d866fcba01b24584b6f2cbb898\"")')" \
+	"wardryx is pinned to v2.5.1"
+
+run_case "tool-hold-is-seeded: the tokenfuse pin falls below the floor" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("up.sh", "echo \"v1.23.0 6b24fe1ac8f956fbc73e9ac22ea53997228a9a12\"", "echo \"v1.22.0 6b24fe1ac8f956fbc73e9ac22ea53997228a9a12\"")')" \
+	"tokenfuse is pinned to v1.22.0"
+
+run_case "tool-hold-is-seeded: a broker gets the gate with no flag" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("up.sh", "BROKER_WARDRYX_ENV=()\nif [ \"$TYPED_RISK_SIGNAL\" -eq 1 ]; then", "BROKER_WARDRYX_ENV=(\"TOKENFUSE_WARDRYX_MODE=enforce\")\nif [ \"$TYPED_RISK_SIGNAL\" -eq 1 ]; then")')" \
+	"starts the broker's policy gate outside --typed-risk-signal"
+
+run_case "tool-hold-is-seeded: the README stops saying what a default run has" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'import re
+s = open("README.md").read()
+t = s.replace("a default run has no policy decision point on tool calls", "a default run is a demo").replace("A default run has no policy decision point on tool calls", "A default run is a demo")
+assert t != s
+open("README.md", "w").write(t)')" \
+	"README.md does not say that a default run has no policy decision point on tool calls"
+
+run_case "tool-hold-is-seeded: the block is renamed away" fail \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("up.sh", "# tool-hold: begin (managed by up.sh", "# tool-holx: begin (managed by up.sh")')" \
+	"measured nothing"
+
+run_case "tool-hold-is-seeded: a comment that names when_no_grant is not a fault" pass \
+	'./scripts/tool-hold-is-seeded.sh' \
+	"$(py 'edit("up.sh", "# Wardryx (optional): policy decision point with the seeded demo policy.\n", "# Wardryx (optional): policy decision point with the seeded demo policy.\n# when_no_grant: hold is a rule the two stacks seed by default.\n")')"
+
 # --- invariant 29: every component is built from a release tag and the commit it names ---
 
 run_case "pins-are-release-tags: a component is pinned to a branch" fail \
 	'./scripts/pins-are-release-tags.sh' \
-	"$(py 'edit("up.sh", "echo \"v1.19.0 84eabe61b0d5785d5198192c296ab1c58ab346bb\"", "echo \"main 84eabe61b0d5785d5198192c296ab1c58ab346bb\"")')" \
+	"$(py 'edit("up.sh", "echo \"v1.23.0 6b24fe1ac8f956fbc73e9ac22ea53997228a9a12\"", "echo \"main 6b24fe1ac8f956fbc73e9ac22ea53997228a9a12\"")')" \
 	"is not a release tag and a full commit"
 
 run_case "pins-are-release-tags: a pin names a short commit" fail \
 	'./scripts/pins-are-release-tags.sh' \
-	"$(py 'edit("up.sh", "84eabe61b0d5785d5198192c296ab1c58ab346bb\" ;;", "84eabe6\" ;;")')" \
+	"$(py 'edit("up.sh", "6b24fe1ac8f956fbc73e9ac22ea53997228a9a12\" ;;", "6b24fe1\" ;;")')" \
 	"is not a release tag and a full commit"
 
 run_case "pins-are-release-tags: a build reaches the sibling checkout" fail \

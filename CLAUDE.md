@@ -56,6 +56,7 @@ bash -n up.sh && bash -n down.sh && bash -n routines.sh
 ./scripts/demo-runs-after-its-planes.sh
 ./scripts/pins-are-release-tags.sh
 ./scripts/risk-hold-is-seeded.sh
+./scripts/tool-hold-is-seeded.sh
 ./scripts/no-reader-leaves-a-pipe-early.sh
 ./scripts/gates-have-teeth.sh   # invariant 6; needs a clean tree
 ```
@@ -713,7 +714,8 @@ building here and the thing that most often gets skipped.
     GO-2026-6809 (crypto/x509), each commit read again the same way: keyryx v0.1.3, wardryx v2.4.1, vouchryx
     v0.6.1, idryx v1.3.1, heraldyx v0.8.2, scopyx v1.1.1, typryx v0.5.1, qryx v1.1.1, mockryx v0.3.1. A pinned
     release is built with the toolchain its go.mod names, so a release on go1.27.2 stays vulnerable here until
-    the pin moves. Every component has a release (verdryx's first, v0.1.0, since 2026-10-19), and
+    the pin moves. `@claude 2026-11-07`: wardryx moved to v2.6.0 and tokenfuse to v1.23.0 for invariant 34, each
+    commit read the same way. Every component has a release (verdryx's first, v0.1.0, since 2026-10-19), and
     `--from-main` builds sibling or main checkouts and says so at the top of the run.
     *(gate: `scripts/pins-are-release-tags.sh`: each table entry is a release tag and a full 40-hex commit,
     every component the launcher builds has an entry, locate_repo (the sibling lookup) is called only from
@@ -836,6 +838,27 @@ building here and the thing that most often gets skipped.
     `features/a-check-does-not-depend-on-which-process-finished-first.feature`, each bound to a case.
     Not held: `| head`, which is the same race; every one here takes a few lines from a writer of a
     few lines, which is one write.)*
+
+34. **The tool hold goes with the broker's policy gate: under `--typed-risk-signal` a tool call nothing grants is held for a person, and a default run says it has no policy decision point on tool calls.**
+    `@decided 2026-11-07` (paraphrased): a tool call nothing grants is held for a person, a model call passes,
+    and only an explicit grant lifts the hold. `@claude 2026-11-07`: that it goes with this flag here is my
+    reading. stack-single and stack-k8s run the broker against wardryx by default; this launcher's broker asks
+    wardryx only under the flag, so on any other run a floor would be a rule nothing reads, and it would read
+    as a control. The block carries the two stacks' floor and `grant-drills`, and `grant-broker-demo`, which
+    keeps the example the run prints working: one tool, one id, on the broker's static key. It does not carry
+    `grant-install-check`, because nothing here is that identity. wardryx v2.6.0 reads the rule and tokenfuse
+    v1.23.0's broker says why it held, so those two pins are a floor, and a binary that does not read
+    `when_no_grant` is refused before wardryx starts: an older one refuses the file at load, and the stand
+    would stop with no reason.
+    *(gate: `scripts/tool-hold-is-seeded.sh`: the block and the broker's gate under the flag, the block's lines,
+    the one `when_no_grant` line, the refusal above the block, the two pins, `--typed-plan` both ways, and the
+    README's sentence; `features/the-tool-hold-goes-with-the-broker-gate.feature`, 9 scenarios, every one bound
+    to a case in `gates-have-teeth.sh`. Mutants, each caught by a named case: the block written without the
+    flag, a broker gate with no flag, the target narrowed to `agent://*`, a word wardryx refuses, the drills'
+    grant dropped or widened, the demo grant opened to every tool or to any door, the check of `when_no_grant`
+    gone or made a warning, each pin below its floor, the README's sentence gone, and the block renamed away
+    (measured nothing). @measured 2026-11-07, the block on wardryx v2.6.0 and the broker of tokenfuse v1.23.0
+    from their published images, loopback, a stdlib MCP stub: see the pull request.)*
 
 An approved architecture decision is **not finished** until it is two things: a
 numbered invariant in this file, and a gate in a script if it can be checked

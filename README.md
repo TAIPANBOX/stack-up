@@ -57,6 +57,12 @@ gateway is wired to it: the gateway refuses every decision it cannot get from
 wardryx (`TOKENFUSE_WARDRYX_FAILMODE=closed`), so a wardryx that does not come up
 stops the run with exit status 1, and the processes it had started are stopped.
 
+**A default run has no policy decision point on tool calls.** wardryx judges model
+calls through the gateway and web requests through scopyx here, and the MCP broker
+asks it nothing unless `--typed-risk-signal` is given, so a brokered `tools/call` is
+governed by the broker's own scans and no policy. stack-single and stack-k8s run the
+broker against wardryx by default; see "The tool hold" below.
+
 ### The gateway's declassify key
 
 The gateway's `POST /v1/fuse/declassify` lifts a run's taint label (the release
@@ -467,11 +473,56 @@ server you named. `--typed-plan` prints this before anything starts. Each call c
 one ask, capped by the proxy's own `TYPRYX_MAX_CALLS_PER_HOUR` (typryx's default is
 1000, kept separately from the service's).
 
-**The launcher seeds one hold.** With `--typed-risk-signal`, wardryx gets the rule
+**The launcher seeds a hold for the signal.** With `--typed-risk-signal`, wardryx gets the rule
 `stack-up-typed-risk-hold`: a brokered call whose risk class is destructive,
 external_send or financial at 0.8 or more is held for a person, and so is a brokered
 call the signal never reaches (`when_absent: hold`, invariant 28 in CLAUDE.md). An
 approval lifts one held call; single-use stays on. Without the flag nothing is seeded.
+
+### The tool hold
+
+stack-single and stack-k8s hold a tool call nothing grants for a person, on a default
+install. Here it goes with `--typed-risk-signal`, the one run whose broker asks wardryx at
+all: **a default run has no policy decision point on tool calls**, so a rule that reads
+them would have nothing to read. With the flag the launcher adds one block to wardryx's
+policy file:
+
+```yaml
+# tool-hold: begin (managed by up.sh; --typed-risk-signal, invariant 34)
+- name: tool-hold
+  target: "*"
+  when_no_grant: hold
+- name: grant-drills
+  target: agent://mockryx.local/*
+  grant_tool: ["*"]
+- name: grant-broker-demo
+  target: agent://demo.local/mcp-broker-demo
+  grant_tool: [ask]
+  require_identity_source: [client-key]
+  deny_if_chain_unproven: true
+# tool-hold: end
+```
+
+A brokered `tools/call` of an agent no rule grants comes back as JSON-RPC error `-32004`:
+`requires approval`, an approval id, and the reason. A model call of the same agent
+passes. Only a grant lifts the hold, and a restriction never does: the demo rules on
+`agent://mockryx.local/*` restrict and grant nothing. `grant-drills` is the two stacks'
+rule for the fire-drill identities, and `grant-broker-demo` keeps the example this run
+prints working, for that one tool and that one id. The launcher refuses a wardryx that
+does not read `when_no_grant` before it starts one. This launcher pins wardryx v2.6.0, which
+reads it, and tokenfuse v1.23.0, whose broker says why it held.
+
+To give an agent of yours a tool for this run, write a grant. A target has to name a
+trust domain, and `"*"` in `grant_tool` is every tool:
+
+```sh
+curl -X PUT http://127.0.0.1:8090/v1/policies/grant-my-agent \
+  -H "Authorization: Bearer $(cat ~/.stack-up/wardryx-admin.key)" -H "Content-Type: application/json" \
+  -d '{"name":"grant-my-agent","target":"agent://demo.local/my-agent","grant_tool":["ask"]}'
+```
+
+It lives in wardryx's memory for the run, as a policy written this way does (the seeded
+policy file is rewritten on every `./up.sh`), and it is in force at once, with no restart.
 
 To write a rule of your own, this is wardryx's example (its README, "Typed risk
 signals"), pointed at the broker's demo agent:

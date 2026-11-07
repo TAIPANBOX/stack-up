@@ -131,7 +131,8 @@
 #   --typed-risk-signal also run `typryx wardryx-proxy` and point the MCP
 #                       broker (and only the broker) at it, so a brokered tool
 #                       call reaches wardryx with typryx's risk answer attached
-#                       as a signal a `hold_if_signal` policy can read. Off
+#                       as a signal a `hold_if_signal` policy can read, and a
+#                       tool call nothing grants is held for a person. Off
 #                       unless given; refused (exit 2) unless typryx is going to
 #                       run (--with-typed, or --typed-mode jev or own-model)
 #                       and wardryx is (not --only money). Each brokered call
@@ -288,11 +289,15 @@ KEYRYX_TRAILRYX_KEY_PATH="$KEYRYX_DIR/trailryx.key"
 # go.mod names toolchain go1.27.2 is built here with that toolchain, which carries
 # GO-2026-6809 in crypto/x509. costcrew v0.10.0 and agent-stack-go v2.0.1 have no newer
 # release and are unchanged.
+#
+# On 2026-11-07 wardryx moved to v2.6.0 and tokenfuse to v1.23.0, each commit read again with
+# git ls-remote: the tool hold (invariant 34) is wardryx's when_no_grant and the broker saying
+# why it held. scripts/tool-hold-is-seeded.sh holds these two as a floor.
 pin_of() {
   case "$1" in
     keyryx)         echo "v0.1.3 11df9c2faea31e06e2528a2163072bf7e341434f" ;;
-    tokenfuse)      echo "v1.19.0 84eabe61b0d5785d5198192c296ab1c58ab346bb" ;;
-    wardryx)        echo "v2.4.1 217fb8faa3e0f84fe1e08cad47da06c9bd99dab6" ;;
+    tokenfuse)      echo "v1.23.0 6b24fe1ac8f956fbc73e9ac22ea53997228a9a12" ;;
+    wardryx)        echo "v2.6.0 99bd9326619c33d866fcba01b24584b6f2cbb898" ;;
     vouchryx)       echo "v0.6.1 9f47c25a585836b0bcb55a523105728b4308fb81" ;;
     idryx)          echo "v1.3.1 035bfeeaa6709ba2142a3f621f71e72f81b252e0" ;;
     heraldyx)       echo "v0.8.2 1492aae3087068a656101ca5985f21d3cec754d3" ;;
@@ -732,6 +737,7 @@ print_typed_plan() {
     printf 'typed: risk signal leaves this machine: %s\n' "$TYPED_RISK_LEAVES"
     printf 'typed: risk signal cost: one ask of that backend per eligible brokered call, capped by the proxy'"'"'s own TYPRYX_MAX_CALLS_PER_HOUR (typryx default 1000, separate from the service'"'"'s)\n'
     printf 'typed: risk signal policy: stack-up-typed-risk-hold holds a brokered call whose risk class is destructive, external_send or financial at 0.8 or more, and holds one the signal never reaches (when_absent: hold; invariant 28); an approval lifts one call\n'
+    printf 'typed: tool hold: on with this flag: a brokered tool call nothing grants waits for a person (tool-hold, when_no_grant: hold; invariant 34); grant-drills and grant-broker-demo are seeded beside it, and model calls pass\n'
     printf 'typed: risk signal deadlines: the proxy waits %s ms for the backend'"'"'s answer (typryx'"'"'s own default, 150 ms, would drop a hosted or local-model answer), the broker waits %s ms for the decision\n' "$RISK_ASK_TIMEOUT_MS" "$RISK_DECIDE_TIMEOUT_MS"
     unset_next=0
     for e in "${TYPRYX_PROXY_ENV[@]}"; do
@@ -744,7 +750,7 @@ print_typed_plan() {
       fi
     done
   elif [ "$WITH_TYPED" -eq 1 ]; then
-    printf 'typed: risk signal: off (the broker reaches no policy plane; --typed-risk-signal turns it on)\n'
+    printf 'typed: risk signal: off (the broker reaches no policy plane, so no tool call meets a policy decision point; --typed-risk-signal turns it on)\n'
   fi
 }
 
@@ -2467,6 +2473,32 @@ YAML
     when_absent: hold
 YAML
     log "typed: wardryx holds a brokered call that the risk signal does not reach (stack-up-typed-risk-hold, when_absent: hold); an approval lifts one call"
+    # The tool hold (invariant 34). stack-single and stack-k8s hold a tool call nothing
+    # grants on a default install; here it goes with this flag, because this is the one run
+    # whose broker asks wardryx at all. Without it no tool call reaches a policy decision
+    # point, so a floor would be a rule nothing reads. Only a grant lifts it: the demo rules
+    # above restrict and grant nothing. grant-drills is the two stacks' rule for the fire-drill
+    # identities, and grant-broker-demo keeps the example this run prints working: one tool,
+    # one id, on the broker's static key. Refused before wardryx starts, because a wardryx
+    # older than v2.6.0 refuses the file at load and the stand would stop with no reason.
+    bin_reads_setting "$WARDRYX_BIN" when_no_grant \
+      || die "--typed-risk-signal needs wardryx v2.6.0 or newer, for the tool hold, and $WARDRYX_BIN does not read when_no_grant. Update the wardryx checkout ($WARDRYX_REPO) and run again with --force-install if another tool installed it."
+    cat >> "$POLICY_FILE" <<YAML
+# tool-hold: begin (managed by up.sh; --typed-risk-signal, invariant 34)
+- name: tool-hold
+  target: "*"
+  when_no_grant: hold
+- name: grant-drills
+  target: agent://mockryx.local/*
+  grant_tool: ["*"]
+- name: grant-broker-demo
+  target: agent://$DEMO_TRUST_DOMAIN/mcp-broker-demo
+  grant_tool: [ask]
+  require_identity_source: [client-key]
+  deny_if_chain_unproven: true
+# tool-hold: end
+YAML
+    log "typed: wardryx holds a brokered tool call nothing grants (tool-hold, when_no_grant: hold); model calls pass"
   fi
   # WARDRYX_KEYS names this run's two keys in wardryx's own "key:org:role" form.
   # The gateway, the MCP broker and scopyx are enforcement points and hold the pep
@@ -2916,9 +2948,10 @@ fi
 # sends (tokenfuse#353), for which it asks typryx in-process "what risk class is
 # this call" and appends the answer as one `signals` entry. wardryx v1.2.0 reads
 # it through a `hold_if_signal` policy rule (wardryx#81), which can turn an allow
-# into a hold and nothing else. The one rule seeded here is stack-up-typed-risk-hold
-# (invariant 28): it holds a call the signal never reaches, and it is written only
-# under --typed-risk-signal. Any other policy that holds calls is the operator's to write.
+# into a hold and nothing else. Two holds are seeded, both written only under
+# --typed-risk-signal: stack-up-typed-risk-hold (invariant 28) holds a call the signal
+# never reaches, and tool-hold (invariant 34) holds a tool call nothing grants. Any other
+# policy that holds calls is the operator's to write.
 #
 # WHO IS POINTED AT IT. Only the broker (BROKER_WARDRYX_ENV, below). The LLM
 # gateway keeps talking to wardryx directly, on the estate audit's reasoning
@@ -3425,6 +3458,7 @@ if [ "$WITH_TYPED" -eq 1 ]; then
     log "risk:    typryx wardryx-proxy on http://127.0.0.1:$TYPRYX_PROXY_PORT in front of wardryx; ONLY the broker is pointed at it (the gateway talks to wardryx directly)"
     log "         data:    $TYPED_RISK_LEAVES"
     log "         policy:  stack-up-typed-risk-hold holds a brokered call whose risk class is destructive, external_send or financial at 0.8 or more, and any brokered call the signal never reaches; an approval lifts one call (invariant 28)"
+    log "         policy:  tool-hold holds a brokered tool call nothing grants, and the example above is granted its one tool; model calls pass (invariant 34)"
   fi
 fi
 if [ "$WANT_RECORDS" -eq 1 ]; then

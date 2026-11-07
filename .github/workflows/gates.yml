@@ -111,6 +111,9 @@ jobs:
       - name: a typed risk signal holds the call it never reaches
         run: ./scripts/risk-hold-is-seeded.sh
 
+      - name: the tool hold goes with the flag, and only a grant lifts it
+        run: ./scripts/tool-hold-is-seeded.sh
+
       - name: no pipe ends in a grep that leaves early
         run: ./scripts/no-reader-leaves-a-pipe-early.sh
 

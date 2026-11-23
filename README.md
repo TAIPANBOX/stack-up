@@ -509,8 +509,9 @@ passes. Only a grant lifts the hold, and a restriction never does: the demo rule
 `agent://mockryx.local/*` restrict and grant nothing. `grant-drills` is the two stacks'
 rule for the fire-drill identities, and `grant-broker-demo` keeps the example this run
 prints working, for that one tool and that one id. The launcher refuses a wardryx that
-does not read `when_no_grant` before it starts one. This launcher pins wardryx v2.6.0, which
-reads it, and tokenfuse v1.23.0, whose broker says why it held.
+does not read `when_no_grant` before it starts one. wardryx v2.6.0 is the first release that
+reads it, and tokenfuse v1.23.0 the first whose broker says why it held; this launcher pins
+wardryx v2.8.0 and tokenfuse v1.25.0.
 
 To give an agent of yours a tool for this run, write a grant. A target has to name a
 trust domain, and `"*"` in `grant_tool` is every tool:
@@ -867,7 +868,7 @@ holds. It also holds `trailryx-root`, the key that signs each sealed root of the
 The **witness** reads the event streams and the record from its own process, keeps its
 own log, and writes nothing to the streams. Its findings go to a file of their own,
 `~/.stack-up/keyryx/alerts/keyryx.ndjson`, which is neither the shared bus nor the
-witness's data directory. heraldyx (v0.8.2; v0.8.0 was the first release that renders keyryx's findings) reads that
+witness's data directory. heraldyx (v0.9.1; v0.8.0 was the first release that renders keyryx's findings) reads that
 file beside the bus and writes what it would mail to `~/.stack-up/mail.txt`. This launcher
 starts no console; the closing summary prints the `GENARYX_EVENTS_EXTRA` line a Genaryx
 console you start yourself needs to show the findings as incidents. On any run after the
@@ -891,7 +892,7 @@ root signed in one run still verifies in the next. The wardryx bearer key is min
 each run. No key value is printed, logged, or put on a command line; the summary names
 no key.
 
-keyryx is built from the commit that the tag `v0.1.3` names and nothing else. Its releases
+keyryx is built from the commit that the tag `v0.1.5` names and nothing else. Its releases
 are container images, not binaries, and this launcher runs no containers, so the clone is
 refused unless it is that commit. The pin is one line of the pin table (`pin_of`) in
 `up.sh`; moving it is one change.

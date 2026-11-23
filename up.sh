@@ -280,8 +280,9 @@ KEYRYX_TRAILRYX_KEY_PATH="$KEYRYX_DIR/trailryx.key"
 # commit is built here with go build, and this launcher runs no containers. The digest a
 # release pins is the commit its tag names (invariant 29).
 #
-# verdryx published its first release, v0.1.0, on 2026-10-19; before that it had no line
-# and was built only with --from-main.
+# verdryx published its first release, v0.1.0, on 2026-10-19, and is pinned like every
+# other component since. It is a Python tool, installed into a venv from its pinned
+# checkout (install_py_tool), as engram is.
 #
 # On 2026-10-28 nine Go components moved to their go1.27.3 patch releases (keyryx v0.1.3,
 # wardryx v2.4.1, vouchryx v0.6.1, idryx v1.3.1, heraldyx v0.8.2, scopyx v1.1.1, typryx v0.5.1,
@@ -293,23 +294,30 @@ KEYRYX_TRAILRYX_KEY_PATH="$KEYRYX_DIR/trailryx.key"
 # On 2026-11-07 wardryx moved to v2.6.0 and tokenfuse to v1.23.0, each commit read again with
 # git ls-remote: the tool hold (invariant 34) is wardryx's when_no_grant and the broker saying
 # why it held. scripts/tool-hold-is-seeded.sh holds these two as a floor.
+#
+# On 2026-11-23 every line moved to its repository's latest release, each commit read again with
+# git ls-remote (the peeled commit of the tag). Each of the eleven Go releases names toolchain
+# go1.27.4 in its go.mod (read at its tag), so the GO-2026-6859 fix in net/http is built in.
+# No release between the old and the new pin needs a setting this launcher does not already
+# pass: the release notes were read for each step, and every new setting they name is optional
+# with a default that keeps the behaviour this launcher relies on.
 pin_of() {
   case "$1" in
-    keyryx)         echo "v0.1.3 11df9c2faea31e06e2528a2163072bf7e341434f" ;;
-    tokenfuse)      echo "v1.23.0 6b24fe1ac8f956fbc73e9ac22ea53997228a9a12" ;;
-    wardryx)        echo "v2.6.0 99bd9326619c33d866fcba01b24584b6f2cbb898" ;;
-    vouchryx)       echo "v0.6.1 9f47c25a585836b0bcb55a523105728b4308fb81" ;;
-    idryx)          echo "v1.3.1 035bfeeaa6709ba2142a3f621f71e72f81b252e0" ;;
-    heraldyx)       echo "v0.8.2 1492aae3087068a656101ca5985f21d3cec754d3" ;;
-    scopyx)         echo "v1.1.1 91ebdb087f027be64a492cef26a2fdbd4ea9af04" ;;
-    costcrew)       echo "v0.10.0 a3549f2997953e92d01658758c831f5dc92776a3" ;;
-    typryx)         echo "v0.5.1 3a3184dd7567423e322a1fcce472ead9d93a8ee1" ;;
-    trailryx)       echo "v1.5.0 cf2439de8dc4b65ebad589e92ae4b9dd6dcac536" ;;
-    qryx)           echo "v1.1.1 432f0502f8d68623fdcd1a58b5e59711618527d9" ;;
-    mockryx)        echo "v0.3.1 81c78303a00eb74b50b783a40816be6110b4b64f" ;;
-    agent-stack-go) echo "v2.0.1 e52e7fc98d77996429543d342b9bf9e7899304a0" ;;
-    engram)         echo "v3.0.0 b0b72a87bda73b8ec1287ee6d2450dd60290a0b3" ;;
-    verdryx)        echo "v0.1.0 42617d2268500e46b93302a93de7412522668e91" ;;
+    keyryx)         echo "v0.1.5 6443973c7fc4fa712726fe0bf57809973695068b" ;;
+    tokenfuse)      echo "v1.25.0 ad60ca600a9583912d2ab801759710968136ac7e" ;;
+    wardryx)        echo "v2.8.0 f405454403cb2d0c453c239b50b6d40d4e4f193e" ;;
+    vouchryx)       echo "v0.8.0 8399d7be00ed9b0d3e0c6c1bdfd26cc5c27da906" ;;
+    idryx)          echo "v1.4.1 5d7b11e02fc3219662613ad056772f9a9e7789b6" ;;
+    heraldyx)       echo "v0.9.1 bdf127ef08fe791070288ba417569331e9e53901" ;;
+    scopyx)         echo "v1.3.1 6adfc05aa31ba799ca2894dda9863eb44e6e506f" ;;
+    costcrew)       echo "v0.10.2 a490505af8d4859b0ee2f01fbf945cb4216df9ad" ;;
+    typryx)         echo "v0.6.1 fb570e359f995c0b0bd7dae1424a337b633fb7a6" ;;
+    trailryx)       echo "v1.6.0 cc3d2e8a7c49bf6843b735461032c6fc2c17df3b" ;;
+    qryx)           echo "v1.2.0 912724d6611cf18332c4788d84f9348e6d476a71" ;;
+    mockryx)        echo "v0.5.1 213b18e5ea2652b6db759938fdcc4016bc9bdbaa" ;;
+    agent-stack-go) echo "v2.0.3 7a858dfb7338325848e48629b8625fe995ca0c2a" ;;
+    engram)         echo "v3.1.0 28ad83f9a37f54e23797c833b40921033b04c334" ;;
+    verdryx)        echo "v0.3.0 ab61a745c5b3d920de3951674923fc59ac430ea8" ;;
     *)              ;;
   esac
 }
@@ -807,7 +815,7 @@ print_launch_plan() {
   if [ "$FROM_MAIN" -eq 1 ]; then
     printf 'launch: components: built from SIBLING OR MAIN CHECKOUTS (--from-main), NOT the pinned release tags (invariant 29)\n'
   else
-    printf 'launch: components: built from their pinned release tags, each at the commit the pin table names (invariant 29); a checkout that is not that commit is refused; verdryx has no release tag and is not built\n'
+    printf 'launch: components: built from their pinned release tags, each at the commit the pin table names (invariant 29); a checkout that is not that commit is refused; engram and verdryx, the two Python tools, are installed the same way\n'
   fi
   printf 'launch: gateway run-budget ceiling: %s USD per run (TOKENFUSE_MAX_RUN_BUDGET_USD; a budget that comes from the caller, a policy default or the built-in default is clamped to it, a Cloud budget is not)\n' "$RUN_BUDGET_CEILING_USD"
   printf 'launch: agent firewall: %s (TOKENFUSE_FIREWALL on every gateway start; enforce refuses exec, write and network egress on a run that read untrusted input, and network egress on a run holding a secret; shadow records those refusals and lets them through; off turns the firewall off)\n' "$FIREWALL_MODE"
@@ -1001,7 +1009,7 @@ pinned_repo() {
   fi
   pin="$(pin_of "$name")"
   if [ -z "$pin" ]; then
-    warn "$name publishes no release tag, so this launcher cannot pin it. It is built only with --from-main."
+    warn "$name has no line in the pin table, so this launcher cannot pin it. It is built only with --from-main."
     return 1
   fi
   read -r tag commit <<<"$pin"

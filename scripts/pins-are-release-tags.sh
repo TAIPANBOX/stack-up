@@ -15,9 +15,9 @@
 # WHAT IT HOLDS
 #
 # 1. pin_of is the one place a component's tag and commit are written. Every entry
-#    is a release tag (vMAJOR.MINOR.PATCH) and a full 40-hex commit, except verdryx,
-#    which publishes no release tag and so has an empty entry: it is built only with
-#    --from-main, and says so.
+#    is a release tag (vMAJOR.MINOR.PATCH) and a full 40-hex commit. verdryx is no
+#    exception since its first release (v0.1.0, 2026-10-19); a component with no entry
+#    is not built, and only --from-main reaches it.
 # 2. Every component the launcher builds has an entry, and every pinned_repo call
 #    that names a component literally names one that has an entry.
 # 3. locate_repo, the sibling-or-main lookup, is called from nowhere but pinned_repo.

@@ -14,9 +14,9 @@
 #
 # WHAT IT HOLDS
 #
-# 1. The pins: trailryx v1.5.0 (the first release that reads TRAILRYX_KEYRYX_KID) and keyryx v0.1.3
-#    (attestations 0640, so the record plane can read them) are the pin table's entries, at their
-#    tags' commits.
+# 1. The pins: trailryx is at least v1.5.0 (the first release that reads TRAILRYX_KEYRYX_KID) and
+#    keyryx at least v0.1.3 (attestations 0640, so the record plane can read them). A floor rather
+#    than one exact line, so a later release moves one line of the pin table and nothing here.
 # 2. The launcher reads custody's key set (/v1/jwks/trailryx-root) and its state (/v1/state) once
 #    custody answers, and takes the pin only from a P-384 key whose kid is its RFC 7638 thumbprint.
 # 3. The refusals name their reasons: no ES384 key; more than one at install time; a pin that is not
@@ -61,11 +61,19 @@ fn_code() {
   code "$1" | awk -v fn="$2" 'index($0, fn "() {") == 1 { p = 1 } p { print } p && /^}/ { exit }'
 }
 
-# 1. the pins.
-grep -qE '^[[:space:]]+trailryx\)[[:space:]]+echo "v1\.5\.0 cf2439de8dc4b65ebad589e92ae4b9dd6dcac536" ;;' up.sh \
-  || problem "the trailryx pin is not v1.5.0 at cf2439de8dc4b65ebad589e92ae4b9dd6dcac536 (the first release that reads TRAILRYX_KEYRYX_KID)"
-grep -qE '^[[:space:]]+keyryx\)[[:space:]]+echo "v0\.1\.3 11df9c2faea31e06e2528a2163072bf7e341434f" ;;' up.sh \
-  || problem "the keyryx pin is not v0.1.3 at 11df9c2faea31e06e2528a2163072bf7e341434f (attestations 0640)"
+# 1. the pins: a floor under each, so moving a pin to a later release is one line of the table.
+# The format of the line (a release tag and a full commit) is pins-are-release-tags.sh's to hold.
+at_least() { # COMPONENT FLOOR WHY
+  local tag
+  tag="$(sed -nE 's/^[[:space:]]+'"$1"'\)[[:space:]]+echo "(v[0-9.]+) [0-9a-f]{40}" ;;$/\1/p' up.sh)"
+  if [ -z "$tag" ]; then
+    problem "pin_of has no release tag and commit for $1, so its floor was not judged"
+  elif [ "$(printf '%s\n%s\n' "$2" "$tag" | sort -V | head -1)" != "$2" ]; then
+    problem "the $1 pin is $tag, below $2 ($3)"
+  fi
+}
+at_least trailryx v1.5.0 "the first release that reads TRAILRYX_KEYRYX_KID"
+at_least keyryx v0.1.3 "attestations 0640, built on go1.27.3"
 
 # 2 and 3. the pin is taken from custody's key set and active key, and the refusals say why.
 pin_fn="$(fn_code up.sh record_key_pin)"

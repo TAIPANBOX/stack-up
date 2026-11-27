@@ -1575,12 +1575,12 @@ run_case "bus-files-match-sources: the witness's findings file loses its keyryx 
 
 run_case "bus-files-match-sources: the heraldyx pin goes back before the keyryx source" fail \
 	'./scripts/bus-files-match-sources.sh' \
-	"$(py 'edit("up.sh", "    heraldyx)       echo \"v0.9.1 ", "    heraldyx)       echo \"v0.7.0 ")')" \
+	"$(py 'edit("up.sh", "    heraldyx)       echo \"v0.10.0 ", "    heraldyx)       echo \"v0.7.0 ")')" \
 	"older than v0.8.0"
 
 run_case "keyryx-is-per-run: the pin is a branch name, not a commit" fail \
 	'./scripts/keyryx-is-per-run.sh' \
-	"$(py 'edit("up.sh", "echo \"v0.1.5 6443973c7fc4fa712726fe0bf57809973695068b\" ;;", "echo \"main\" ;;")')" \
+	"$(py 'edit("up.sh", "echo \"v0.2.0 7f8898f69265aa9c33adb2e5a2a8561fd6b95f4d\" ;;", "echo \"main\" ;;")')" \
 	"keyryx is not pinned to a commit"
 
 run_case "keyryx-is-per-run: no custody start to judge" fail \
@@ -1829,7 +1829,7 @@ run_case "tool-hold-is-seeded: the wardryx pin falls below the floor" fail \
 
 run_case "tool-hold-is-seeded: the tokenfuse pin falls below the floor" fail \
 	'./scripts/tool-hold-is-seeded.sh' \
-	"$(py 'edit("up.sh", "echo \"v1.25.0 ad60ca600a9583912d2ab801759710968136ac7e\"", "echo \"v1.22.0 ad60ca600a9583912d2ab801759710968136ac7e\"")')" \
+	"$(py 'edit("up.sh", "echo \"v1.27.0 aea718b1458d7ca3facdc970b61035b858342076\"", "echo \"v1.22.0 aea718b1458d7ca3facdc970b61035b858342076\"")')" \
 	"tokenfuse is pinned to v1.22.0"
 
 run_case "tool-hold-is-seeded: a broker gets the gate with no flag" fail \
@@ -1859,12 +1859,12 @@ run_case "tool-hold-is-seeded: a comment that names when_no_grant is not a fault
 
 run_case "pins-are-release-tags: a component is pinned to a branch" fail \
 	'./scripts/pins-are-release-tags.sh' \
-	"$(py 'edit("up.sh", "echo \"v1.25.0 ad60ca600a9583912d2ab801759710968136ac7e\"", "echo \"main ad60ca600a9583912d2ab801759710968136ac7e\"")')" \
+	"$(py 'edit("up.sh", "echo \"v1.27.0 aea718b1458d7ca3facdc970b61035b858342076\"", "echo \"main aea718b1458d7ca3facdc970b61035b858342076\"")')" \
 	"is not a release tag and a full commit"
 
 run_case "pins-are-release-tags: a pin names a short commit" fail \
 	'./scripts/pins-are-release-tags.sh' \
-	"$(py 'edit("up.sh", "ad60ca600a9583912d2ab801759710968136ac7e\" ;;", "ad60ca6\" ;;")')" \
+	"$(py 'edit("up.sh", "aea718b1458d7ca3facdc970b61035b858342076\" ;;", "aea718b\" ;;")')" \
 	"is not a release tag and a full commit"
 
 run_case "pins-are-release-tags: a build reaches the sibling checkout" fail \
@@ -2018,12 +2018,12 @@ run_case "record-is-signed-by-default: a comment that names the node binary is n
 
 run_case "record-key-is-pinned: the trailryx pin falls below v1.5.0" fail \
 	'./scripts/record-key-is-pinned.sh' \
-	"$(py 'edit("up.sh", "trailryx)       echo \"v1.6.0 cc3d2e8a7c49bf6843b735461032c6fc2c17df3b\"", "trailryx)       echo \"v1.4.0 8e3bb7b454aed49b2bb20e975e63ec54136cc17d\"")')" \
+	"$(py 'edit("up.sh", "trailryx)       echo \"v1.7.0 0b9c51415648ec19805978cff46b54ffc35f7b4f\"", "trailryx)       echo \"v1.4.0 8e3bb7b454aed49b2bb20e975e63ec54136cc17d\"")')" \
 	"the trailryx pin is v1.4.0, below v1.5.0"
 
 run_case "record-key-is-pinned: the keyryx pin falls below v0.1.3" fail \
 	'./scripts/record-key-is-pinned.sh' \
-	"$(py 'edit("up.sh", "keyryx)         echo \"v0.1.5 6443973c7fc4fa712726fe0bf57809973695068b\"", "keyryx)         echo \"v0.1.2 21edb5c6744416cc0705434e9d0dc3489cc0c61e\"")')" \
+	"$(py 'edit("up.sh", "keyryx)         echo \"v0.2.0 7f8898f69265aa9c33adb2e5a2a8561fd6b95f4d\"", "keyryx)         echo \"v0.1.2 21edb5c6744416cc0705434e9d0dc3489cc0c61e\"")')" \
 	"the keyryx pin is v0.1.2, below v0.1.3"
 
 run_case "record-key-is-pinned: record_key_pin does not read custody's trailryx-root key set" fail \

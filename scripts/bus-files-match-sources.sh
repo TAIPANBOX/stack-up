@@ -65,6 +65,9 @@ SOURCES = ["agent-conform", "console", "costcrew", "engram", "heraldyx", "idryx"
 ALLOWED = {s: {s} for s in SOURCES}
 ALLOWED["tokenfuse-cloud"] = {"tokenfuse"}
 ALLOWED["tokenfuse-mcp"] = {"tokenfuse"}
+# keyryx custody's own stream (key_rotated, key_revoked), on the bus; heraldyx v0.10.0 is the
+# first whose exception table carries "keyryx-custody": {"keyryx"}.
+ALLOWED["keyryx-custody"] = {"keyryx"}
 # Off the bus (invariant 32): the witness's findings. heraldyx v0.8.0 is the first whose
 # knownSources carries keyryx, so the stem needs that pin.
 OFF_BUS = {"keyryx": ("keyryx", (0, 8, 0))}

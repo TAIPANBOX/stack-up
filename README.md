@@ -511,7 +511,7 @@ rule for the fire-drill identities, and `grant-broker-demo` keeps the example th
 prints working, for that one tool and that one id. The launcher refuses a wardryx that
 does not read `when_no_grant` before it starts one. wardryx v2.6.0 is the first release that
 reads it, and tokenfuse v1.23.0 the first whose broker says why it held; this launcher pins
-wardryx v2.8.0 and tokenfuse v1.27.0.
+wardryx v2.8.0 and tokenfuse v1.27.1.
 
 To give an agent of yours a tool for this run, write a grant. A target has to name a
 trust domain, and `"*"` in `grant_tool` is every tool:

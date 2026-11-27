@@ -310,11 +310,13 @@ KEYRYX_TRAILRYX_KEY_PATH="$KEYRYX_DIR/trailryx.key"
 # tokenfuse v1.27.0, vouchryx v0.9.0, heraldyx v0.10.0, costcrew v0.11.0, trailryx v1.7.0, qryx v1.2.1,
 # verdryx v0.4.0). keyryx v0.2.0 refuses to start without KEYRYX_EVENTS, its own stream
 # (keyryx-custody.ndjson on the bus, which heraldyx v0.10.0 reads as source keyryx), and serves
-# rotation and revocation only on an admin socket under KEYRYX_DATA.
+# rotation and revocation only on an admin socket under KEYRYX_DATA. Later the same day tokenfuse
+# moved to v1.27.1 (6d4ec48, read with git ls-remote), which changes only the published contract:
+# ReplayEvent.on_behalf_of carries maxItems 32 (agent-passport SPEC 5.1).
 pin_of() {
   case "$1" in
     keyryx)         echo "v0.2.0 7f8898f69265aa9c33adb2e5a2a8561fd6b95f4d" ;;
-    tokenfuse)      echo "v1.27.0 aea718b1458d7ca3facdc970b61035b858342076" ;;
+    tokenfuse)      echo "v1.27.1 6d4ec48f57bbd192b1ac32c5e6157c780b4a7893" ;;
     wardryx)        echo "v2.8.0 f405454403cb2d0c453c239b50b6d40d4e4f193e" ;;
     vouchryx)       echo "v0.9.0 55a42b639d329646aa62d20b7c0551ee83641ff0" ;;
     idryx)          echo "v1.4.1 5d7b11e02fc3219662613ad056772f9a9e7789b6" ;;

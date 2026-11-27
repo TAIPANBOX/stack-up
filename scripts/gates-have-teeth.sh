@@ -1829,7 +1829,7 @@ run_case "tool-hold-is-seeded: the wardryx pin falls below the floor" fail \
 
 run_case "tool-hold-is-seeded: the tokenfuse pin falls below the floor" fail \
 	'./scripts/tool-hold-is-seeded.sh' \
-	"$(py 'edit("up.sh", "echo \"v1.27.0 aea718b1458d7ca3facdc970b61035b858342076\"", "echo \"v1.22.0 aea718b1458d7ca3facdc970b61035b858342076\"")')" \
+	"$(py 'edit("up.sh", "echo \"v1.27.1 6d4ec48f57bbd192b1ac32c5e6157c780b4a7893\"", "echo \"v1.22.0 6d4ec48f57bbd192b1ac32c5e6157c780b4a7893\"")')" \
 	"tokenfuse is pinned to v1.22.0"
 
 run_case "tool-hold-is-seeded: a broker gets the gate with no flag" fail \
@@ -1859,12 +1859,12 @@ run_case "tool-hold-is-seeded: a comment that names when_no_grant is not a fault
 
 run_case "pins-are-release-tags: a component is pinned to a branch" fail \
 	'./scripts/pins-are-release-tags.sh' \
-	"$(py 'edit("up.sh", "echo \"v1.27.0 aea718b1458d7ca3facdc970b61035b858342076\"", "echo \"main aea718b1458d7ca3facdc970b61035b858342076\"")')" \
+	"$(py 'edit("up.sh", "echo \"v1.27.1 6d4ec48f57bbd192b1ac32c5e6157c780b4a7893\"", "echo \"main 6d4ec48f57bbd192b1ac32c5e6157c780b4a7893\"")')" \
 	"is not a release tag and a full commit"
 
 run_case "pins-are-release-tags: a pin names a short commit" fail \
 	'./scripts/pins-are-release-tags.sh' \
-	"$(py 'edit("up.sh", "aea718b1458d7ca3facdc970b61035b858342076\" ;;", "aea718b\" ;;")')" \
+	"$(py 'edit("up.sh", "6d4ec48f57bbd192b1ac32c5e6157c780b4a7893\" ;;", "6d4ec48\" ;;")')" \
 	"is not a release tag and a full commit"
 
 run_case "pins-are-release-tags: a build reaches the sibling checkout" fail \

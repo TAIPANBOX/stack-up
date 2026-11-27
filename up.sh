@@ -261,6 +261,10 @@ KEYRYX_WITNESS_DIR="$KEYRYX_DIR/witness"
 # heraldyx v0.8.0 reads as source keyryx (invariant 14).
 KEYRYX_ALERTS_DIR="$KEYRYX_DIR/alerts"
 KEYRYX_ALERTS_FILE="$KEYRYX_ALERTS_DIR/keyryx.ndjson"
+# Custody's own stream (keyryx v0.2.0 refuses to start without it): key_rotated and key_revoked,
+# written when an operator runs `keyryx admin rotate|revoke`. On the bus, where heraldyx v0.10.0
+# reads keyryx-custody.ndjson as source keyryx.
+KEYRYX_CUSTODY_EVENTS="$EVENTS_DIR/keyryx-custody.ndjson"
 KEYRYX_CUSTODY_ROOT_KEY_PATH="$KEYRYX_DIR/custody-root.key"
 KEYRYX_WITNESS_ROOT_KEY_PATH="$KEYRYX_DIR/witness-root.key"
 KEYRYX_POLICY_PATH="$KEYRYX_DIR/policy.json"
@@ -301,23 +305,29 @@ KEYRYX_TRAILRYX_KEY_PATH="$KEYRYX_DIR/trailryx.key"
 # No release between the old and the new pin needs a setting this launcher does not already
 # pass: the release notes were read for each step, and every new setting they name is optional
 # with a default that keeps the behaviour this launcher relies on.
+#
+# On 2026-11-27 eight lines moved again, each commit read again with git ls-remote (keyryx v0.2.0,
+# tokenfuse v1.27.0, vouchryx v0.9.0, heraldyx v0.10.0, costcrew v0.11.0, trailryx v1.7.0, qryx v1.2.1,
+# verdryx v0.4.0). keyryx v0.2.0 refuses to start without KEYRYX_EVENTS, its own stream
+# (keyryx-custody.ndjson on the bus, which heraldyx v0.10.0 reads as source keyryx), and serves
+# rotation and revocation only on an admin socket under KEYRYX_DATA.
 pin_of() {
   case "$1" in
-    keyryx)         echo "v0.1.5 6443973c7fc4fa712726fe0bf57809973695068b" ;;
-    tokenfuse)      echo "v1.25.0 ad60ca600a9583912d2ab801759710968136ac7e" ;;
+    keyryx)         echo "v0.2.0 7f8898f69265aa9c33adb2e5a2a8561fd6b95f4d" ;;
+    tokenfuse)      echo "v1.27.0 aea718b1458d7ca3facdc970b61035b858342076" ;;
     wardryx)        echo "v2.8.0 f405454403cb2d0c453c239b50b6d40d4e4f193e" ;;
-    vouchryx)       echo "v0.8.0 8399d7be00ed9b0d3e0c6c1bdfd26cc5c27da906" ;;
+    vouchryx)       echo "v0.9.0 55a42b639d329646aa62d20b7c0551ee83641ff0" ;;
     idryx)          echo "v1.4.1 5d7b11e02fc3219662613ad056772f9a9e7789b6" ;;
-    heraldyx)       echo "v0.9.1 bdf127ef08fe791070288ba417569331e9e53901" ;;
+    heraldyx)       echo "v0.10.0 9e896aaa2cb583d0cd406cbd82d23339746757f5" ;;
     scopyx)         echo "v1.3.1 6adfc05aa31ba799ca2894dda9863eb44e6e506f" ;;
-    costcrew)       echo "v0.10.2 a490505af8d4859b0ee2f01fbf945cb4216df9ad" ;;
+    costcrew)       echo "v0.11.0 fc6352fc339e88869a20e1b6aea13a5b8b43e89e" ;;
     typryx)         echo "v0.6.1 fb570e359f995c0b0bd7dae1424a337b633fb7a6" ;;
-    trailryx)       echo "v1.6.0 cc3d2e8a7c49bf6843b735461032c6fc2c17df3b" ;;
-    qryx)           echo "v1.2.0 912724d6611cf18332c4788d84f9348e6d476a71" ;;
+    trailryx)       echo "v1.7.0 0b9c51415648ec19805978cff46b54ffc35f7b4f" ;;
+    qryx)           echo "v1.2.1 bf485c6969ed81cee540106215aad890cb211f43" ;;
     mockryx)        echo "v0.5.1 213b18e5ea2652b6db759938fdcc4016bc9bdbaa" ;;
     agent-stack-go) echo "v2.0.3 7a858dfb7338325848e48629b8625fe995ca0c2a" ;;
     engram)         echo "v3.1.0 28ad83f9a37f54e23797c833b40921033b04c334" ;;
-    verdryx)        echo "v0.3.0 ab61a745c5b3d920de3951674923fc59ac430ea8" ;;
+    verdryx)        echo "v0.4.0 0565efd274881bbc5fc7c69c21e381ae5fa73911" ;;
     *)              ;;
   esac
 }
@@ -2362,6 +2372,7 @@ JSON
   KEYRYX_DATA="$KEYRYX_CUSTODY_DIR" \
   KEYRYX_ROOT_KEY_FILE="$KEYRYX_CUSTODY_ROOT_KEY_PATH" \
   KEYRYX_POLICY="$KEYRYX_POLICY_PATH" \
+  KEYRYX_EVENTS="$KEYRYX_CUSTODY_EVENTS" \
     "$KEYRYX_BIN" custody > "$LOGS_DIR/keyryx.log" 2>&1 &
   register keyryx "$!" TERM
   # wardryx signs grants through custody and fails a grant it cannot sign (503,
